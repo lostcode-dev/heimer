@@ -22,6 +22,7 @@ interface CustomDatePickerProps {
   error?: string;
   disabled?: boolean;
   withTime?: boolean;
+  instruction?: string;
   children?: React.ReactNode;
   onChange: (value: string) => void;
 
@@ -39,6 +40,7 @@ export default function CustomDatePicker({
   disabled,
   withTime = false,
   children,
+  instruction,
   onChange,
 }: CustomDatePickerProps) {
   const [open, setOpen] = useState(false)
@@ -49,6 +51,8 @@ export default function CustomDatePicker({
       htmlFor={htmlFor ?? name}
       error={error}
       required={required}
+      instruction={instruction}
+
     >
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild className="block w-full">

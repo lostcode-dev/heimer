@@ -30,6 +30,11 @@ type Initial = {
 
 export function EmployeeForm({ open, onOpenChange, initial, onSubmit }: { open: boolean; onOpenChange?: (o: boolean) => void; initial?: Initial; onSubmit: (data: Omit<Initial, 'id'> & { password?: string }) => Promise<void> }) {
     const isEdit = Boolean(initial?.id)
+    const todayLocal = () => {
+        const d = new Date()
+        const tz = d.getTimezoneOffset() * 60000
+        return new Date(d.getTime() - tz).toISOString().slice(0, 10)
+    }
     const [form, setForm] = useState({
         full_name: initial?.full_name ?? '',
         email: initial?.email ?? '',
@@ -46,7 +51,7 @@ export function EmployeeForm({ open, onOpenChange, initial, onSubmit }: { open: 
         city: initial?.city ?? '',
         state: initial?.state ?? '',
         birth_date: initial?.birth_date?.slice(0, 10) ?? '',
-        hire_date: initial?.hire_date?.slice(0, 10) ?? '',
+        hire_date: initial?.hire_date?.slice(0, 10) ?? todayLocal(),
         notes: initial?.notes ?? '',
     })
     const [errors, setErrors] = useState<{ full_name?: string; email?: string; password?: string }>({})
@@ -68,7 +73,8 @@ export function EmployeeForm({ open, onOpenChange, initial, onSubmit }: { open: 
             city: initial?.city ?? '',
             state: initial?.state ?? '',
             birth_date: initial?.birth_date?.slice(0, 10) ?? '',
-            hire_date: initial?.hire_date?.slice(0, 10) ?? '',
+            // For new employee (no initial), default hire date to today; for edit, keep existing or blank
+            hire_date: initial ? (initial.hire_date?.slice(0, 10) ?? '') : todayLocal(),
             notes: initial?.notes ?? '',
             password: '',
         }))
@@ -165,13 +171,14 @@ export function EmployeeForm({ open, onOpenChange, initial, onSubmit }: { open: 
         <CustomForm open={open} onOpenChange={onOpenChange} title={isEdit ? 'Editar Funcionário' : 'Novo Funcionário'} onSubmit={submit}>
             <>
                 <div className="grid gap-4">
-                    <CustomInput name="full_name" label="Nome" value={form.full_name} onChange={(v) => change('full_name', v)} />
+                    <CustomInput name="full_name" label="Nome" value={form.full_name} onChange={(v) => change('full_name', v)} required />
                     <div className="grid md:grid-cols-2 gap-4">
                         <CustomInput
                             name="email"
                             label="Email"
                             value={form.email}
                             onChange={(v) => change('email', v)}
+                            required
                             instruction="Será utilizado como usuário de acesso ao sistema."
                         />
                         {!isEdit && (
@@ -181,13 +188,13 @@ export function EmployeeForm({ open, onOpenChange, initial, onSubmit }: { open: 
                                 type="password"
                                 value={form.password}
                                 onChange={(v) => change('password', v)}
+                                required
                                 instruction="Defina a senha que o funcionário usará para acessar."
                             />
                         )}
                     </div>
-                    <Separator className="my-2" />
                     <div className="grid md:grid-cols-2 gap-4">
-                        <CustomInput name="phone" label="Telefone" value={form.phone} onChange={(v) => change('phone', v)} mask={maskPhone} />
+                        <CustomInput name="phone" label="Telefone" value={form.phone} onChange={(v) => change('phone', v)} mask={maskPhone} required/>
                     </div>
                     <div className="grid gap-2">
                         <div className="flex items-center gap-3">
@@ -203,11 +210,8 @@ export function EmployeeForm({ open, onOpenChange, initial, onSubmit }: { open: 
                           label="Nascimento"
                           value={form.birth_date}
                           onChange={(v) => change('birth_date', v)}
-                        >
-                          <div className="px-3 py-2 text-xs text-muted-foreground">
-                            Use esta data para lembrarmos do aniversário futuramente.
-                          </div>
-                        </CustomDatePicker>
+                          instruction="Esta data é usada para lembrarmos do aniversário."
+                        />
                     </div>
                     <div className="grid md:grid-cols-2 gap-4">
                         <CustomDatePicker name="hire_date" label="Admissão" value={form.hire_date} onChange={(v) => change('hire_date', v)} />

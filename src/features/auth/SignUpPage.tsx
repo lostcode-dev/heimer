@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label'
 import { AuthContainer } from './AuthContainer'
 import { UserPlus, Mail, Lock, ArrowRight, Eye, EyeOff } from 'lucide-react'
 import { toast } from 'sonner'
+import { supabase } from '@/lib/supabaseClient'
 
 export default function SignUpPage() {
   const navigate = useNavigate()
@@ -37,14 +38,11 @@ export default function SignUpPage() {
     }
     setLoading(true)
     try {
-      // Server-side bootstrap: create auth user, company, and membership atomically
-      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/signup-bootstrap`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, company_name: companyName || null }),
+      // Server-side bootstrap via Supabase Edge Function
+      const { error: fnError } = await supabase.functions.invoke('signup-bootstrap', {
+        body: { email, password, company_name: companyName || null },
       })
-      const json = await res.json()
-      if (!res.ok) throw new Error(json?.error || 'Falha no cadastro')
+      if (fnError) throw new Error(fnError.message || 'Falha no cadastro')
       setInfo('Conta criada! Faça login para continuar.')
       toast.success('Conta criada com sucesso!', {
         description: 'Você será redirecionado para o login em 3 segundos.',

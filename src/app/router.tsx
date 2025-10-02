@@ -57,7 +57,7 @@ const router = createBrowserRouter([
                     { path: 'orders/new', element: <OrderNewEditPage /> },
                     { path: 'orders/:id', element: <OrderDetailsPage /> },
                     { path: 'cash', element: <CashPage /> },
-                    { path: 'reports', element: <ReportsPage /> },
+                    { path: 'reports/overview', element: <ReportsPage /> },
                     { path: 'settings/company', element: <CompanySettingsPage /> },
                     { path: 'settings/billing', element: <BillingPage /> },
                 ],

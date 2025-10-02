@@ -112,11 +112,11 @@ export default function AppLayout() {
         title: 'Relatórios',
         icon: ClipboardList,
         items: [
-          { title: 'Visão Geral', url: AppRoutes.Customers },
-          { title: 'Vendas', url: AppRoutes.Products },
-          { title: 'Serviços', url: AppRoutes.Services },
-          { title: 'Caixa', url: AppRoutes.Suppliers },
-          { title: 'Clientes', url: AppRoutes.Technicians },
+          { title: 'Visão Geral', url: '/app/reports/overview' },
+          { title: 'Vendas', url: '/app/reports/overview' },
+          { title: 'Serviços', url: '/app/reports/overview' },
+          { title: 'Caixa', url: '/app/reports/overview' },
+          { title: 'Clientes', url: '/app/reports/overview' },
         ],
       },
       {

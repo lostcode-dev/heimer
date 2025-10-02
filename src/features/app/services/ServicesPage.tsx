@@ -195,29 +195,27 @@ export default function ServicesPage() {
   ]
 
   return (
-    <div className="@container/main flex flex-1 flex-col gap-2">
-      <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6">
-        <CustomTable
-          data={rows}
-          columns={columns}
-          pagination={pagination}
-          selected={selected}
-          loading={loading}
-          actions={actions}
-          onRowSelectionChange={(rows: unknown[]) => setSelected(rows as Service[])}
-          onRequest={onRequest}
-          onAddItem={onAddItem}
-          onRemoveItens={(rows: unknown[]) => { void onRemoveItens(rows as Service[]) }}
-        />
-        <ServiceForm
-          key={`${editing?.id ?? 'new'}-${editKey}`}
-          open={openForm}
-          onOpenChange={setOpenForm}
-          initial={editing ? { ...editing, sku: editing.sku ?? undefined } : undefined}
-          loading={loading}
-          onSubmit={onSave}
-        />
-      </div>
-    </div>
+    <>
+      <CustomTable
+        data={rows}
+        columns={columns}
+        pagination={pagination}
+        selected={selected}
+        loading={loading}
+        actions={actions}
+        onRowSelectionChange={(rows: unknown[]) => setSelected(rows as Service[])}
+        onRequest={onRequest}
+        onAddItem={onAddItem}
+        onRemoveItens={(rows: unknown[]) => { void onRemoveItens(rows as Service[]) }}
+      />
+      <ServiceForm
+        key={`${editing?.id ?? 'new'}-${editKey}`}
+        open={openForm}
+        onOpenChange={setOpenForm}
+        initial={editing ? { ...editing, sku: editing.sku ?? undefined } : undefined}
+        loading={loading}
+        onSubmit={onSave}
+      />
+    </>
   )
 }

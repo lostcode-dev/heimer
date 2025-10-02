@@ -172,7 +172,7 @@ export default function EmployeesPage() {
   }
 
   return (
-    <section className="flex flex-1 flex-col gap-4 my-4 md:gap-6">
+    <>
       <CustomTable
         data={rows}
         columns={columns}
@@ -192,6 +192,6 @@ export default function EmployeesPage() {
         initial={editing ?? undefined}
         onSubmit={onSave}
       />
-    </section>
+    </>
   )
 }

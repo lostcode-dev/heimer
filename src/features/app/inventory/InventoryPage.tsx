@@ -83,7 +83,7 @@ export default function InventoryPage() {
   ]
 
   return (
-    <section className="flex flex-1 flex-col gap-4 my-4 md:gap-6">
+    <>
       <CustomTable
         data={rows}
         columns={columns}
@@ -103,6 +103,6 @@ export default function InventoryPage() {
         initial={editing ? { ...editing, product_label: editing.product ? `${editing.product.sku} · ${editing.product.name}` : '' } : undefined}
         onSubmit={onSave}
       />
-    </section>
+    </>
   )
 }

@@ -64,7 +64,7 @@ export function CustomTable({
 
   return (
     <div className="w-full flex-col justify-start gap-6">
-      <div className="relative flex flex-col gap-4 overflow-auto px-4 lg:px-6">
+      <div className="relative flex flex-col gap-4 overflow-auto">
         <div className="flex items-center justify-between gap-4">
           <CustomInput
             name="search"

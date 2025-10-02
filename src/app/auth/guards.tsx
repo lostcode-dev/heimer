@@ -1,5 +1,5 @@
 import { Navigate, Outlet } from 'react-router-dom'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAuth } from './AuthProvider'
 import { supabase } from '@/lib/supabaseClient'
 
@@ -7,18 +7,22 @@ export function AuthGuard() {
   const { loading, session, signOut } = useAuth()
   const [checkingCompany, setCheckingCompany] = useState(false)
   const [hasCompany, setHasCompany] = useState<boolean | null>(null)
+  const checkedOnce = useRef<boolean>(false)
 
   useEffect(() => {
     let mounted = true
     async function checkCompany() {
       if (!session) return
+      // Skip re-checks if already determined once for this session
+      if (checkedOnce.current && hasCompany !== null) return
       setCheckingCompany(true)
       try {
         const { data } = await supabase.rpc('current_company_id')
         if (!mounted) return
-        setHasCompany(Boolean(data))
-        if (!data) {
-          // No company linked: sign out and let redirect below handle
+        const ok = Boolean(data)
+        setHasCompany(ok)
+        checkedOnce.current = true
+        if (!ok) {
           await signOut()
         }
       } finally {
@@ -29,7 +33,8 @@ export function AuthGuard() {
     return () => { mounted = false }
   }, [session])
 
-  if (loading || (session && (checkingCompany || hasCompany === null))) return <p>Carregando…</p>
+  // Avoid flashing loading after initial check; if we already determined hasCompany, render directly
+  if (loading || (session && !checkedOnce.current && (checkingCompany || hasCompany === null))) return <p>Carregando…</p>
   if (!session) return <Navigate to="/auth/signin" replace />
   if (hasCompany === false) return <Navigate to="/auth/signin?error=no-company" replace />
   return <Outlet />

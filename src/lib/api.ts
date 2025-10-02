@@ -937,10 +937,30 @@ export const apiSupplierSearch = {
 // ADMIN
 export const apiCompanies = {
   async getMyCompany() {
-    const { data, error } = await supabase.rpc('current_company_id')
-    if (error) throw error
-    const companyId = data as unknown as string | null
-    if (!companyId) return null
+    // Try RPC first
+    let companyId: string | null = null
+    try {
+      const { data } = await supabase.rpc('current_company_id')
+      companyId = (data as unknown as string | null) ?? null
+    } catch (_e) {
+      companyId = null
+    }
+    // Fallback: derive from user_companies if RPC not available or returned null
+    if (!companyId) {
+      const { data: userData } = await supabase.auth.getUser()
+      const uid = userData.user?.id
+      if (!uid) return null
+      const { data: link, error: linkErr } = await supabase
+        .from('user_companies')
+        .select('company_id')
+        .eq('user_id', uid)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      if (linkErr) throw linkErr
+      companyId = (link as any)?.company_id ?? null
+      if (!companyId) return null
+    }
     const { data: company, error: cErr } = await supabase.from('companies').select('*').eq('id', companyId).single()
     if (cErr) throw cErr
     return company
@@ -1045,6 +1065,215 @@ export const apiAdminUsers = {
   },
 }
 
+// DASHBOARD METRICS
+export const apiDashboard = {
+  async getMonthlyOverview() {
+    const now = new Date()
+    const start = new Date(now.getFullYear(), now.getMonth(), 1)
+    const end = new Date(now.getFullYear(), now.getMonth() + 1, 1)
+    const startIso = start.toISOString()
+    const endIso = end.toISOString()
+
+    // Previous month window
+    const prevStart = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+    const prevEnd = new Date(now.getFullYear(), now.getMonth(), 1)
+    const prevStartIso = prevStart.toISOString()
+    const prevEndIso = prevEnd.toISOString()
+
+    // Revenue (payments in current month)
+    const paymentsPromise = supabase
+      .from('payments')
+      .select('amount, received_at')
+      .gte('received_at', startIso)
+      .lt('received_at', endIso)
+
+    // Completed orders and avg ticket (DELIVERED in current month)
+    const ordersPromise = supabase
+      .from('service_orders')
+      .select('id, total_amount, delivered_at, status')
+      .eq('status', 'DELIVERED')
+      .gte('delivered_at', startIso)
+      .lt('delivered_at', endIso)
+
+    // New customers count
+    const customersPromise = supabase
+      .from('customers')
+      .select('id', { count: 'exact', head: true })
+      .gte('created_at', startIso)
+      .lt('created_at', endIso)
+
+    // Previous month queries
+    const prevPaymentsPromise = supabase
+      .from('payments')
+      .select('amount, received_at')
+      .gte('received_at', prevStartIso)
+      .lt('received_at', prevEndIso)
+
+    const prevOrdersPromise = supabase
+      .from('service_orders')
+      .select('id, total_amount, delivered_at, status')
+      .eq('status', 'DELIVERED')
+      .gte('delivered_at', prevStartIso)
+      .lt('delivered_at', prevEndIso)
+
+    const prevCustomersPromise = supabase
+      .from('customers')
+      .select('id', { count: 'exact', head: true })
+      .gte('created_at', prevStartIso)
+      .lt('created_at', prevEndIso)
+
+    const [
+      { data: payRows, error: payErr },
+      { data: ordRows, error: ordErr },
+      { count: custCount, error: custErr },
+      { data: prevPayRows, error: prevPayErr },
+      { data: prevOrdRows, error: prevOrdErr },
+      { count: prevCustCount, error: prevCustErr },
+    ] = await Promise.all([
+      paymentsPromise,
+      ordersPromise,
+      customersPromise,
+      prevPaymentsPromise,
+      prevOrdersPromise,
+      prevCustomersPromise,
+    ])
+    if (payErr) throw payErr
+    if (ordErr) throw ordErr
+    if (custErr) throw custErr
+    if (prevPayErr) throw prevPayErr
+    if (prevOrdErr) throw prevOrdErr
+    if (prevCustErr) throw prevCustErr
+
+    const revenue = (payRows ?? []).reduce((acc: number, r: any) => acc + Number(r.amount || 0), 0)
+    const completedOrders = (ordRows ?? []).length
+    const avgTicket = completedOrders > 0 ? (ordRows ?? []).reduce((acc: number, r: any) => acc + Number(r.total_amount || 0), 0) / completedOrders : 0
+    const newCustomers = custCount ?? 0
+
+    const prevRevenue = (prevPayRows ?? []).reduce((acc: number, r: any) => acc + Number(r.amount || 0), 0)
+    const prevCompletedOrders = (prevOrdRows ?? []).length
+    const prevAvgTicket = prevCompletedOrders > 0 ? (prevOrdRows ?? []).reduce((acc: number, r: any) => acc + Number(r.total_amount || 0), 0) / prevCompletedOrders : 0
+    const prevNewCustomers = prevCustCount ?? 0
+
+    return { revenue, completedOrders, newCustomers, avgTicket, prevRevenue, prevCompletedOrders, prevNewCustomers, prevAvgTicket }
+  },
+}
+
+// SALES TIMESERIES (payments grouped by day)
+export const apiSales = {
+  async getSalesTimeseries(range: '7d' | '30d' | '90d') {
+    const days = range === '7d' ? 7 : range === '30d' ? 30 : 90
+
+    const end = new Date()
+    end.setHours(23, 59, 59, 999)
+    const start = new Date(end)
+    start.setDate(start.getDate() - (days - 1))
+    start.setHours(0, 0, 0, 0)
+
+    const startIso = start.toISOString()
+    const endIso = end.toISOString()
+
+    const { data: payRows, error } = await supabase
+      .from('payments')
+      .select('id, amount, received_at, service_order_id')
+      .gte('received_at', startIso)
+      .lte('received_at', endIso)
+      .order('received_at', { ascending: true })
+    if (error) throw error
+
+    // Initialize days with zero totals
+    const series: { [date: string]: { total: number; products: number; os: number } } = {}
+    const iter = new Date(start)
+    while (iter <= end) {
+      const key = iter.toISOString().slice(0, 10)
+      series[key] = { total: 0, products: 0, os: 0 }
+      iter.setDate(iter.getDate() + 1)
+    }
+
+    const payments = (payRows ?? []) as Array<{ id: string; amount: number; received_at: string; service_order_id: string | null }>
+
+    // Fetch related orders and items for breakdown allocation
+    const orderIds = Array.from(new Set(payments.map(p => p.service_order_id).filter(Boolean))) as string[]
+    let productsTotalsByOrder: Record<string, number> = {}
+    let laborTotalsByOrder: Record<string, number> = {}
+    let orderTotalsByOrder: Record<string, number> = {}
+    if (orderIds.length > 0) {
+      const { data: orders, error: ordersErr } = await supabase
+        .from('service_orders')
+        .select('id, labor_price, total_amount')
+        .in('id', orderIds)
+      if (ordersErr) throw ordersErr
+      for (const o of orders ?? []) {
+        laborTotalsByOrder[o.id as string] = Number((o as any).labor_price || 0)
+        orderTotalsByOrder[o.id as string] = Number((o as any).total_amount || 0)
+      }
+      const { data: items, error: itemsErr } = await supabase
+        .from('service_order_items')
+        .select('service_order_id, total')
+        .in('service_order_id', orderIds)
+      if (itemsErr) throw itemsErr
+      for (const it of items ?? []) {
+        const oid = it.service_order_id as string
+        productsTotalsByOrder[oid] = (productsTotalsByOrder[oid] || 0) + Number((it as any).total || 0)
+      }
+    }
+
+    // Aggregate payments by day with allocation to products vs os
+    for (const row of payments) {
+      const d = new Date(row.received_at)
+      const key = d.toISOString().slice(0, 10)
+      const amount = Number(row.amount || 0)
+      if (!(key in series)) continue
+      series[key].total += amount
+      if (row.service_order_id) {
+        const oid = row.service_order_id
+        const orderTotal = orderTotalsByOrder[oid] || 0
+        const productsTotal = productsTotalsByOrder[oid] || 0
+        const laborTotal = laborTotalsByOrder[oid] || 0
+        if (orderTotal > 0) {
+          const prodShare = amount * (productsTotal / orderTotal)
+          const osShare = amount * (laborTotal / orderTotal)
+          series[key].products += prodShare
+          series[key].os += osShare
+        } else {
+          // if no total, allocate to OS by default
+          series[key].os += amount
+        }
+      }
+    }
+
+    // Build array sorted by date
+    const result = Object.entries(series)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([date, v]) => ({ date, total: v.total, products: v.products, os: v.os }))
+
+    return result
+  },
+  async listRecentSales(limit = 10) {
+    // Join payments -> service_orders -> customers, users (technician)
+    const { data, error } = await supabase
+      .from('payments')
+      .select(`
+        id,
+        amount,
+        method,
+        received_at,
+        service_order:service_orders(id, ticket_number, customer:customers(full_name), technician:users(full_name))
+      `)
+      .order('received_at', { ascending: false })
+      .limit(limit)
+    if (error) throw error
+    return (data ?? []).map((p: any) => ({
+      id: p.id,
+      amount: Number(p.amount || 0),
+      method: p.method,
+      received_at: p.received_at,
+      ticket_number: p.service_order?.ticket_number ?? '-',
+      customer_name: p.service_order?.customer?.full_name ?? '-',
+      technician_name: p.service_order?.technician?.full_name ?? '-',
+    }))
+  },
+}
+
 // EMPLOYEES (App-scoped staff management)
 export const apiEmployees = {
   async listPaginated(params: { page: number; pageSize: number; query?: string; sortBy?: string; sortDir?: 'asc' | 'desc' }) {
@@ -1077,5 +1306,89 @@ export const apiEmployees = {
     const { error } = await supabase.from('users').delete().in('id', ids)
     if (error) throw error
     return true
+  },
+}
+
+// REMINDERS
+export const apiReminders = {
+  async getLowStock(limit = 20) {
+    // Use products_with_stock view to get current stock_qty; filter by stock_qty <= reorder_level
+    const { data, error } = await supabase
+      .from('products_with_stock')
+      .select('id, sku, name, stock_qty, reorder_level')
+      .order('stock_qty', { ascending: true })
+      .limit(limit)
+    if (error) throw error
+    const rows = (data ?? []) as Array<any>
+    return rows.filter(r => Number(r.stock_qty ?? 0) <= Number(r.reorder_level ?? 0))
+  },
+  async getUpcomingBirthdays(daysAhead = 14) {
+    // Collect from customers, users (employees), and technicians
+    const now = new Date()
+    const target = new Date(now)
+    target.setDate(target.getDate() + daysAhead)
+
+    function withinWindow(dateStr?: string | null) {
+      if (!dateStr) return false
+      const d = new Date(dateStr)
+      const mm = d.getMonth(); const dd = d.getDate()
+      const y = now.getFullYear()
+      const thisYear = new Date(y, mm, dd)
+      const nextYear = new Date(y + 1, mm, dd)
+      // choose the next occurrence from today
+      const next = thisYear >= new Date(now.getFullYear(), now.getMonth(), now.getDate()) ? thisYear : nextYear
+      return next <= target
+    }
+
+    const [customers, users] = await Promise.all([
+      supabase.from('customers').select('id, full_name, birth_date').is('deleted_at', null),
+      supabase.from('users').select('id, full_name, birth_date'),
+    ])
+
+    const list: Array<{ id: string; full_name: string; birth_date: string; type: 'customer' | 'employee' | 'technician' }> = []
+    for (const c of (customers.data ?? [])) {
+      if (withinWindow((c as any).birth_date)) list.push({ id: (c as any).id, full_name: (c as any).full_name, birth_date: (c as any).birth_date, type: 'customer' })
+    }
+    for (const u of (users.data ?? [])) {
+      if (withinWindow((u as any).birth_date)) list.push({ id: (u as any).id, full_name: (u as any).full_name ?? '-', birth_date: (u as any).birth_date, type: 'employee' })
+    }
+    // technicians birth_date not guaranteed; skip if absent
+    // Optionally, if technicians had a birth_date column, you could include similar logic.
+
+    // sort by upcoming date
+    list.sort((a, b) => {
+      const ad = new Date(a.birth_date); const bd = new Date(b.birth_date)
+      const ay = now.getFullYear(); const by = now.getFullYear()
+      const an = new Date(ay, ad.getMonth(), ad.getDate())
+      const bn = new Date(by, bd.getMonth(), bd.getDate())
+      return an.getTime() - bn.getTime()
+    })
+    return list
+  },
+  async getOrdersDueSoon(daysAhead = 3) {
+    // Orders not delivered/cancelled with due_date within window
+    const now = new Date()
+    const startIso = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
+    const end = new Date(now)
+    end.setDate(end.getDate() + daysAhead)
+    const endIso = end.toISOString()
+
+    const { data, error } = await supabase
+      .from('service_orders')
+      .select('id, ticket_number, due_date, status, customer:customer_id(full_name)')
+      .not('status', 'in', '(DELIVERED,CANCELLED)')
+      .gte('due_date', startIso)
+      .lte('due_date', endIso)
+      .order('due_date', { ascending: true })
+    if (error) throw error
+
+    const rows = (data ?? []) as Array<any>
+    return rows.map((r) => {
+      const due = new Date(r.due_date)
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+      const diffMs = due.getTime() - today.getTime()
+      const days_left = Math.round(diffMs / (24 * 60 * 60 * 1000))
+      return { id: r.id as string, ticket_number: r.ticket_number as string, due_date: r.due_date as string, days_left, customer_name: r.customer?.full_name ?? '-' }
+    })
   },
 }

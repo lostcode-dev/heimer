@@ -338,7 +338,7 @@ export default function OrderNewEditPage() {
     }
 
     return (
-        <div className="flex flex-col gap-4 my-4 md:gap-6 mx-4 md:mx-6">
+        <div className="flex flex-col gap-4">
             {/* Cabeçalho e contato */}
             <Card className="p-4 space-y-4">
                 <div className="grid md:grid-cols-4 gap-4">

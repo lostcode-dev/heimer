@@ -1,12 +1,12 @@
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 
-import { LayoutDashboard, ClipboardList, Boxes, Settings } from "lucide-react";
+import { LayoutDashboard, ClipboardList, Boxes, Settings, ListChecks } from "lucide-react";
 import { Outlet, useLocation } from "react-router-dom";
 import { AppSidebar } from "../common/AppSidebar";
 import { SiteHeader } from "../common/SiteHeader";
 import { useAuth } from "@/app/auth/AuthProvider";
 import { useEffect, useMemo, useState } from "react";
-import { apiCompanies } from "@/lib/api";
+import { apiCompanies, apiAuth, apiBilling } from "@/lib/api";
 
 const AppRoutes = {
   Dashboard: "/app/dashboard",
@@ -27,7 +27,9 @@ export default function AppLayout() {
   const { pathname } = useLocation();
   const { user } = useAuth();
 
-  const [companyName, setCompanyName] = useState<string>("Minha Empresa");
+  const [companyName, setCompanyName] = useState<string>("");
+  const [profileName, setProfileName] = useState<string>("");
+  const [planLabel, setPlanLabel] = useState<string>("Studio");
 
   useEffect(() => {
     (async () => {
@@ -40,7 +42,34 @@ export default function AppLayout() {
     })();
   }, []);
 
+  useEffect(() => {
+    (async () => {
+      try {
+        const p = await apiAuth.getProfile();
+        if (p?.full_name) setProfileName(p.full_name as string);
+      } catch {
+        // ignore
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const o = await apiBilling.getOverview();
+        // Map subscription status to a friendly label
+        const status = (o.subscription?.status ?? '').toString();
+        if (status === 'active' || status === 'trialing') setPlanLabel('Ativo');
+        else if (status) setPlanLabel(status.charAt(0).toUpperCase() + status.slice(1));
+        else setPlanLabel('Gratuito');
+      } catch {
+        // keep default
+      }
+    })();
+  }, []);
+
   const displayNameRaw =
+    profileName ||
     (user?.user_metadata as any)?.full_name ||
     (user?.user_metadata as any)?.name ||
     (user?.email ? String(user.email).split("@")[0] : "Usuário");
@@ -78,7 +107,7 @@ export default function AppLayout() {
       {
         name: companyName,
         logo: CompanyLogo,
-        plan: 'Studio',
+        plan: planLabel,
       },
     ],
     navMain: [
@@ -89,8 +118,9 @@ export default function AppLayout() {
       },
       {
         title: 'Operações',
-        icon: ClipboardList,
+        icon: ListChecks,
         items: [
+          { title: 'Lembretes', url: '/app/reminders' },
           { title: 'Ordens de Serviço', url: AppRoutes.Orders },
           { title: 'Caixa', url: AppRoutes.Cash },
           { title: 'Estoque', url: AppRoutes.Inventory },
@@ -130,6 +160,17 @@ export default function AppLayout() {
     ],
   };
 
+  // Sort child items alphabetically by title to ensure consistent ordering in the sidebar
+  const navMainSorted = sidebarData.navMain.map((item: any) => {
+    if (Array.isArray(item.items)) {
+      const sortedChildren = [...item.items].sort((a, b) =>
+        (a?.title || '').localeCompare(b?.title || '', 'pt-BR', { sensitivity: 'base' })
+      )
+      return { ...item, items: sortedChildren }
+    }
+    return item
+  })
+
   function findActiveTitle(items: any[]): string | undefined {
     for (const item of items) {
       // First, check children to prefer the deepest active title
@@ -144,7 +185,7 @@ export default function AppLayout() {
 
   // Compute a single, most-specific active link (longest matching URL)
   const flatEntries: Array<{ level: 'item' | 'sub'; i: number; j?: number; url: string }> = []
-  sidebarData.navMain.forEach((item: any, i: number) => {
+  navMainSorted.forEach((item: any, i: number) => {
     if (item.url && item.url !== '#') flatEntries.push({ level: 'item', i, url: item.url })
     if (Array.isArray(item.items)) {
       item.items.forEach((si: any, j: number) => {
@@ -157,7 +198,7 @@ export default function AppLayout() {
     .sort((a, b) => b.url.length - a.url.length)[0]
 
   // Mark only the best match as active; parents become expanded (not active)
-  const itemsWithActive = sidebarData.navMain.map((item: any, i: number) => {
+  const itemsWithActive = navMainSorted.map((item: any, i: number) => {
     if (Array.isArray(item.items)) {
       const sub = item.items.map((si: any, j: number) => ({
         ...si,
@@ -186,7 +227,9 @@ export default function AppLayout() {
         <SiteHeader activeTitle={activeItem} />
         <div className="flex flex-1 flex-col">
           <div className="@container/main flex flex-1 flex-col gap-2">
-            <Outlet />
+            <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6 px-4 lg:px-6">
+              <Outlet />
+            </div>
           </div>
         </div>
       </SidebarInset>

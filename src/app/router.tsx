@@ -22,6 +22,7 @@ import OrderDetailsPage from '../features/app/serviceOrders/OrderDetailsPage'
 import DashboardPage from '../features/app/dashboard/DashboardPage'
 import ReportsPage from '../features/app/reports/ReportsPage'
 import EmployeesPage from '../features/app/employees/EmployeesPage'
+import RemindersPage from '../features/app/reminders/RemindersPage'
 
 import CashPage from '../features/app/cash/CashPage'
 import AppLayout from '../components/layout/AppLayout'
@@ -57,6 +58,7 @@ const router = createBrowserRouter([
                     { path: 'orders/new', element: <OrderNewEditPage /> },
                     { path: 'orders/:id', element: <OrderDetailsPage /> },
                     { path: 'cash', element: <CashPage /> },
+                    { path: 'reminders', element: <RemindersPage /> },
                     { path: 'reports/overview', element: <ReportsPage /> },
                     { path: 'settings/company', element: <CompanySettingsPage /> },
                     { path: 'settings/billing', element: <BillingPage /> },

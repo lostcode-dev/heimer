@@ -95,26 +95,24 @@ export default function OrdersPage() {
   ]
 
   return (
-    <div className="@container/main flex flex-1 flex-col gap-2">
-      <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6">
-        <CustomTable
-          data={rows}
-          columns={columns}
-          pagination={pagination}
-          selected={selected}
-          loading={loading}
-          actions={actions}
-          onRowSelectionChange={(rows: unknown[]) => setSelected(rows as OrderRow[])}
-          onRequest={onRequest}
-          onAddItem={() => navigate('/app/orders/new')}
-          onRemoveItens={(rows: unknown[]) => {
-            const ids = (rows as OrderRow[]).map((r) => r.id)
-            Promise.all(ids.map((id) => apiOrders.remove(id)))
-              .then(() => { toast.success('Ordens removidas'); fetchData() })
-              .catch((e) => toast.error(e?.message ?? 'Falha ao remover'))
-          }}
-        />
-      </div>
-    </div>
+    <>
+      <CustomTable
+        data={rows}
+        columns={columns}
+        pagination={pagination}
+        selected={selected}
+        loading={loading}
+        actions={actions}
+        onRowSelectionChange={(rows: unknown[]) => setSelected(rows as OrderRow[])}
+        onRequest={onRequest}
+        onAddItem={() => navigate('/app/orders/new')}
+        onRemoveItens={(rows: unknown[]) => {
+          const ids = (rows as OrderRow[]).map((r) => r.id)
+          Promise.all(ids.map((id) => apiOrders.remove(id)))
+            .then(() => { toast.success('Ordens removidas'); fetchData() })
+            .catch((e) => toast.error(e?.message ?? 'Falha ao remover'))
+        }}
+      />
+    </>
   )
 }

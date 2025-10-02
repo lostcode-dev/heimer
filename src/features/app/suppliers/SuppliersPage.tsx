@@ -4,6 +4,9 @@ import { toast } from 'sonner'
 import { SupplierForm } from './SupplierForm'
 import { CustomTable } from '@/components/custom/Table/CustomTable'
 import type { IColumns, IPagination } from '@/types'
+import { CheckCircle2, XCircle } from 'lucide-react'
+import NameWithAvatar from '@/components/common/NameWithAvatar'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 export type Supplier = {
   id: string
@@ -12,6 +15,14 @@ export type Supplier = {
   phone: string | null
   is_active: boolean
   created_at: string
+  // address fields
+  cep?: string | null
+  street?: string | null
+  number?: string | null
+  complement?: string | null
+  neighborhood?: string | null
+  city?: string | null
+  state?: string | null
 }
 
 export default function SuppliersPage() {
@@ -115,11 +126,55 @@ export default function SuppliersPage() {
     }) as (row: Record<string, any>) => void,
   }), [])
 
+  const StatusCell: React.FC<{ row: Supplier }> = ({ row }) => (
+    <div className="flex items-center ml-4 gap-1">
+      {row.is_active ? (
+        <CheckCircle2 className="h-4 w-4 text-green-600" aria-label="Ativo" />
+      ) : (
+        <XCircle className="h-4 w-4 text-red-600" aria-label="Inativo" />
+      )}
+      <span className="sr-only">{row.is_active ? 'Ativo' : 'Inativo'}</span>
+    </div>
+  )
+
+  const NameCell: React.FC<{ row: Supplier }> = ({ row }) => (
+    <NameWithAvatar name={row.name} phone={row.phone} />
+  )
+
+  const AddressCell: React.FC<{ row: Supplier }> = ({ row }) => {
+    const street = row.street?.trim()
+    const number = row.number?.trim()
+    const cep = row.cep?.trim()
+    const neighborhood = row.neighborhood?.trim()
+    const city = row.city?.trim()
+    const state = row.state?.trim()
+    if (!cep) return <span>-</span>
+    const compactTop = street || '-'
+    const compactBottom = [number, cep].filter(Boolean).join(' • ')
+    const full = [
+      street && [street, number].filter(Boolean).join(', '),
+      neighborhood,
+      city && state ? `${city} - ${state}` : (city || state),
+      cep,
+    ].filter(Boolean).join(' • ')
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div className="flex flex-col leading-tight cursor-help max-w-[260px]">
+            <span className="truncate">{compactTop}</span>
+            <span className="text-xs text-muted-foreground truncate">{compactBottom}</span>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top" sideOffset={6}>{full}</TooltipContent>
+      </Tooltip>
+    )
+  }
+
   const columns: IColumns<Supplier>[] = [
-    { label: 'Nome', field: 'name', sortable: true },
+    { label: 'Nome', field: 'name', sortable: true, component: NameCell },
     { label: 'E-mail', field: 'email', sortable: true, format: (v) => v ?? '-' },
-    { label: 'Telefone', field: 'phone', sortable: true, format: (v) => v ?? '-' },
-    { label: 'Ativo', field: 'is_active', sortable: true, format: (v) => (v ? 'Sim' : 'Não') },
+    { label: 'Endereço', field: 'street', sortable: false, component: AddressCell },
+    { label: 'Status', field: 'is_active', sortable: true, component: StatusCell },
     { label: 'Criado em', field: 'created_at', sortable: true, format: (v) => new Date(v).toLocaleString('pt-BR') },
   ]
 

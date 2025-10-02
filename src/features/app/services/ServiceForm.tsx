@@ -10,9 +10,9 @@ import { Separator } from '@/components/ui/separator'
 export type ServiceFormProps = {
   open: boolean
   onOpenChange?: (open: boolean) => void
-  initial?: { id?: string; sku?: string; name?: string; category?: string | null; unit_price?: number }
+  initial?: { id?: string; sku?: string; name?: string; unit_price?: number; unit_cost?: number; categories?: string[] | null; tags?: string[] | null }
   loading?: boolean
-  onSubmit: (data: { sku?: string; name: string; category?: string | null; unit_price: number; categories?: string[]; tags?: string[] }) => Promise<void>
+  onSubmit: (data: { sku?: string; name: string; unit_price: number; unit_cost?: number; categories?: string[]; tags?: string[] }) => Promise<void>
 }
 
 export function ServiceForm({ open, onOpenChange, initial, loading, onSubmit }: ServiceFormProps) {
@@ -20,10 +20,11 @@ export function ServiceForm({ open, onOpenChange, initial, loading, onSubmit }: 
     sku: initial?.sku ?? '',
     name: initial?.name ?? '',
     unit_price: initial?.unit_price ?? 0,
+    unit_cost: initial?.unit_cost ?? 0,
     categories: '' as string,
     tags: '' as string,
   })
-  const [errors, setErrors] = useState<{ name?: string; unit_price?: string }>({})
+  const [errors, setErrors] = useState<{ name?: string; unit_price?: string; unit_cost?: string }>({})
   const [technicians, setTechnicians] = useState<TechnicianItem[]>([])
 
   useEffect(() => {
@@ -31,12 +32,13 @@ export function ServiceForm({ open, onOpenChange, initial, loading, onSubmit }: 
       sku: initial?.sku ?? '',
       name: initial?.name ?? '',
       unit_price: initial?.unit_price ?? 0,
-      categories: '',
-      tags: '',
+      unit_cost: initial?.unit_cost ?? 0,
+      categories: Array.isArray(initial?.categories) ? (initial!.categories as string[]).join(', ') : '',
+      tags: Array.isArray(initial?.tags) ? (initial!.tags as string[]).join(', ') : '',
     })
     // reset technicians list when switching
     setTechnicians([{ technician_id: '' }])
-  }, [initial?.sku, initial?.name, initial?.category, initial?.unit_price])
+  }, [initial?.sku, initial?.name, initial?.unit_price, initial?.unit_cost, Array.isArray(initial?.categories) ? initial?.categories?.join('|') : '', Array.isArray(initial?.tags) ? initial?.tags?.join('|') : ''])
 
   // Load technicians on edit
   useEffect(() => {
@@ -62,7 +64,7 @@ export function ServiceForm({ open, onOpenChange, initial, loading, onSubmit }: 
       setForm((p) => {
         if (p.sku && p.sku.trim()) return p
         const rand = Math.random().toString(36).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6)
-        return { ...p, sku: `SERV-${rand}` }
+        return { ...p, sku: `S-${rand}` }
       })
     }
   }, [initial?.id])
@@ -76,6 +78,7 @@ export function ServiceForm({ open, onOpenChange, initial, loading, onSubmit }: 
     const next: typeof errors = {}
     if (!form.name.trim()) next.name = 'Nome é obrigatório'
     if (Number(form.unit_price) <= 0) next.unit_price = 'Preço deve ser maior que 0'
+  if (Number(form.unit_cost) < 0) next.unit_cost = 'Custo não pode ser negativo'
     setErrors(next)
     if (Object.values(next).some(Boolean)) return
 
@@ -85,8 +88,8 @@ export function ServiceForm({ open, onOpenChange, initial, loading, onSubmit }: 
     await onSubmit({
       sku: form.sku || undefined,
       name: form.name,
-      category: null,
       unit_price: Number(form.unit_price) || 0,
+      unit_cost: Number(form.unit_cost) || 0,
       categories: form.categories.split(',').map((s) => s.trim()).filter(Boolean),
       tags: form.tags.split(',').map((s) => s.trim()).filter(Boolean),
     })
@@ -108,7 +111,7 @@ export function ServiceForm({ open, onOpenChange, initial, loading, onSubmit }: 
           />
           <CustomInput name="name" label="Nome" value={form.name} onChange={(v) => change('name', v)} required disabled={loading} error={errors.name} />
         </div>
-        <div className="grid md:grid-cols-1 gap-4">
+        <div className="grid md:grid-cols-2 gap-4">
           <CustomInput
             name="unit_price"
             label="Preço"
@@ -116,6 +119,14 @@ export function ServiceForm({ open, onOpenChange, initial, loading, onSubmit }: 
             value={formatBRL(Number(form.unit_price) || 0)}
             onChange={(v) => change('unit_price', parseBRL(v))}
             error={errors.unit_price}
+          />
+          <CustomInput
+            name="unit_cost"
+            label="Custo"
+            instruction="Custo interno do serviço (opcional)."
+            value={formatBRL(Number(form.unit_cost) || 0)}
+            onChange={(v) => change('unit_cost', parseBRL(v))}
+            error={errors.unit_cost}
           />
         </div>
         <CustomListInput

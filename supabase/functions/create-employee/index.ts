@@ -1,42 +1,115 @@
+// deno-lint-ignore-file no-explicit-any
 // @ts-nocheck
 // Supabase Edge Function: create-employee
-// Creates an auth user with email/password, links to current company, and stores profile in public.users
-import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 
-serve(async (req) => {
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+
+// ---- CORS ----
+const ALLOWED_ORIGIN = Deno.env.get('ALLOWED_ORIGIN') ?? '*'
+const corsHeaders = {
+  'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'authorization, apikey, content-type, x-client-info',
+  // 'Access-Control-Allow-Credentials': 'true', // habilita só se usar cookies
+}
+const json = (status: number, payload: unknown) =>
+  new Response(JSON.stringify(payload), {
+    status,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  })
+
+// ---- Helpers ----
+const emptyToNull = (obj: Record<string, unknown>) =>
+  Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, v === '' ? null : v]))
+
+const DEFAULT_EMPLOYEE_ROLE = Deno.env.get('DEFAULT_EMPLOYEE_ROLE') ?? 'MEMBER'
+
+// ---- Handler ----
+Deno.serve(async (req) => {
+  // Preflight
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
+
   try {
-  const body = await req.json()
-  const { email, password, full_name } = body
-  if (!email || !password) return new Response(JSON.stringify({ error: 'email and password are required' }), { status: 400 })
+    if (req.method !== 'POST') return json(405, { step: 'method', error: 'Method Not Allowed' })
 
-    const adminKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
-    const url = Deno.env.get('SUPABASE_URL') || Deno.env.get('SUPABASE_URL'.toLowerCase())
-    if (!adminKey || !url) return new Response(JSON.stringify({ error: 'service role or url missing' }), { status: 500 })
+    const body = await req.json()
+    const { email, password, full_name } = body
+    if (!email || !password) return json(400, { step: 'validate', error: 'email and password are required' })
 
-    const admin = (await import('https://esm.sh/@supabase/supabase-js@2.46.1')).createClient(url, adminKey)
+    const url = Deno.env.get('SUPABASE_URL')
+    const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+    const anonKey = Deno.env.get('SUPABASE_ANON_KEY')
+    if (!url || !serviceKey || !anonKey) {
+      return json(500, { step: 'env', error: 'Missing SUPABASE_URL / SERVICE_ROLE / ANON key' })
+    }
 
-    // get current authenticated user and company
+    // Clients
+    const admin = createClient(url, serviceKey)
+
     const jwt = req.headers.get('Authorization')?.replace('Bearer ', '')
-    if (!jwt) return new Response(JSON.stringify({ error: 'missing auth token' }), { status: 401 })
-    const authed = (await admin.auth.getUser(jwt)).data.user
-    if (!authed) return new Response(JSON.stringify({ error: 'unauthorized' }), { status: 401 })
+    if (!jwt) return json(401, { step: 'auth', error: 'missing auth token' })
 
-    const { data: companyIdData, error: cidErr } = await admin.rpc('current_company_id')
-    if (cidErr) return new Response(JSON.stringify({ error: cidErr.message }), { status: 400 })
-    const company_id = companyIdData as string | null
-    if (!company_id) return new Response(JSON.stringify({ error: 'no current company' }), { status: 400 })
+    const { data: authedData, error: getUserErr } = await admin.auth.getUser(jwt)
+    if (getUserErr || !authedData?.user) return json(401, { step: 'auth', error: getUserErr?.message || 'unauthorized' })
+    const requester = authedData.user
 
-    // create auth user
-    const created = await admin.auth.admin.createUser({ email, password, email_confirm: true, user_metadata: { full_name } })
-    if (created.error || !created.data.user) return new Response(JSON.stringify({ error: created.error?.message || 'failed to create user' }), { status: 400 })
-    const newUser = created.data.user
+    // company_id: se vier no body, valida que o requester pertence; senão pega a mais recente
+    let company_id: string | null = body.company_id ?? null
+    if (company_id) {
+      const { count, error: relErr } = await admin
+        .from('user_companies')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', requester.id)
+        .eq('company_id', company_id)
+      if (relErr) return json(400, { step: 'checkCompany', error: relErr.message })
+      if (!count) return json(403, { step: 'checkCompany', error: 'user not linked to provided company' })
+    } else {
+      const { data: rel, error: relErr } = await admin
+        .from('user_companies')
+        .select('company_id')
+        .eq('user_id', requester.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single()
+      if (relErr) return json(400, { step: 'resolveCompany', error: relErr.message })
+      company_id = rel?.company_id ?? null
+    }
+    if (!company_id) return json(400, { step: 'resolveCompany', error: 'no current company' })
 
-    // link to company
-    const { error: linkErr } = await admin.from('user_companies').insert({ user_id: newUser.id, company_id, role: 'STAFF' })
-    if (linkErr) return new Response(JSON.stringify({ error: linkErr.message }), { status: 400 })
+    // Cria usuário auth
+    const { data: created, error: cuErr } = await admin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: { full_name: full_name || null },
+    })
+    if (cuErr || !created?.user) return json(400, { step: 'createUser', error: cuErr?.message || 'failed to create user' })
+    const newUser = created.user
 
-    // insert profile
-    const profile = {
+    // Vincula à empresa (role configurável)
+    let { error: linkErr } = await admin.from('user_companies').insert({
+      user_id: newUser.id,
+      company_id,
+      role: DEFAULT_EMPLOYEE_ROLE, // 'MEMBER' por padrão
+    })
+    if (linkErr) {
+      // fallback automático: se schema antigo exigir 'MEMBER' e DEFAULT_EMPLOYEE_ROLE estiver diferente
+      const msg = String(linkErr.message || '')
+      const roleConstraint = msg.includes('user_companies_role_check') || msg.toLowerCase().includes('role')
+      if (roleConstraint && DEFAULT_EMPLOYEE_ROLE !== 'MEMBER') {
+        const retry = await admin.from('user_companies').insert({
+          user_id: newUser.id,
+          company_id,
+          role: 'MEMBER',
+        })
+        if (retry.error) return json(400, { step: 'linkMembership', error: retry.error.message })
+      } else {
+        return json(400, { step: 'linkMembership', error: linkErr.message })
+      }
+    }
+
+    // Perfil (normaliza "" -> null e UPSERT)
+    const profileBase = {
       id: newUser.id,
       full_name,
       email,
@@ -55,11 +128,13 @@ serve(async (req) => {
       hire_date: body.hire_date ? String(body.hire_date).slice(0, 10) : null,
       notes: body.notes ?? null,
     }
-    const { error: profErr } = await admin.from('users').insert(profile)
-    if (profErr) return new Response(JSON.stringify({ error: profErr.message }), { status: 400 })
+    const profile = emptyToNull(profileBase)
 
-    return new Response(JSON.stringify({ id: newUser.id }), { status: 200, headers: { 'Content-Type': 'application/json' } })
-  } catch (e) {
-    return new Response(JSON.stringify({ error: (e as Error).message }), { status: 500, headers: { 'Content-Type': 'application/json' } })
+    const { error: profErr } = await admin.from('users').upsert(profile, { onConflict: 'id' })
+    if (profErr) return json(400, { step: 'upsertProfile', error: profErr.message })
+
+    return json(200, { id: newUser.id, company_id })
+  } catch (e: any) {
+    return json(500, { step: 'catch', error: e?.message || 'internal error' })
   }
 })

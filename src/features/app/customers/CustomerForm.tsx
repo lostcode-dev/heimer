@@ -64,9 +64,7 @@ export function CustomerForm({ open, onOpenChange, initial, loading, onSubmit }:
     // Basic validations
     const newErrors: { full_name?: string; email?: string; phone?: string } = {}
     if (!form.full_name || !form.full_name.trim()) newErrors.full_name = 'Nome é obrigatório'
-    if (!form.email || !form.email.trim()) {
-      newErrors.email = 'E-mail é obrigatório'
-    } else {
+    if (form.email?.trim()) {
       const emailOk = /[^\s@]+@[^\s@]+\.[^\s@]+/.test(form.email)
       if (!emailOk) newErrors.email = 'E-mail inválido'
     }
@@ -148,7 +146,6 @@ export function CustomerForm({ open, onOpenChange, initial, loading, onSubmit }:
           value={form.email}
           onChange={(v) => handleChange('email', v)}
           disabled={loading}
-          required
           error={errors.email}
         />
         <CustomInput
@@ -174,14 +171,14 @@ export function CustomerForm({ open, onOpenChange, initial, loading, onSubmit }:
           name="cep"
           label="CEP"
           value={form.cep}
-            onChange={(v) => handleChange('cep', v)}
-            mask={maskCEP}
+          onChange={(v) => handleChange('cep', v)}
+          mask={maskCEP}
           instruction="Digite o CEP e pressione Enter para buscar"
           onKeyDown={async (e) => {
-              const onlyDigits = form.cep.replace(/\D/g, '')
-              if (e.key === 'Enter' && onlyDigits && onlyDigits.length === 8) {
+            const onlyDigits = form.cep.replace(/\D/g, '')
+            if (e.key === 'Enter' && onlyDigits && onlyDigits.length === 8) {
               try {
-                  const res = await fetch(`https://viacep.com.br/ws/${onlyDigits}/json/`)
+                const res = await fetch(`https://viacep.com.br/ws/${onlyDigits}/json/`)
                 const data = await res.json()
                 if (!data.erro) {
                   setForm((prev) => ({
@@ -254,7 +251,7 @@ export function CustomerForm({ open, onOpenChange, initial, loading, onSubmit }:
 
         </div>
 
-        
+
 
         <CustomCheckbox
           name="is_active"

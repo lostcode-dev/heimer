@@ -1,5 +1,17 @@
 import { supabase } from './supabaseClient'
 
+// Helper: fetch and cache current company id for this session
+let __companyIdCache: string | null = null
+async function getCompanyIdOrThrow(): Promise<string> {
+  if (__companyIdCache) return __companyIdCache
+  const { data, error } = await supabase.rpc('current_company_id')
+  if (error) throw error
+  const cid = data as unknown as string | null
+  if (!cid) throw new Error('Nenhuma empresa ativa vinculada ao usuário.')
+  __companyIdCache = cid
+  return cid
+}
+
 // AUTH
 export const apiAuth = {
   async getProfile() {
@@ -39,9 +51,11 @@ export const apiCustomers = {
     return { data: data ?? [], count: count ?? 0 }
   },
   async create(input: { full_name: string; email?: string | null; phone?: string | null; notes?: string | null; is_active?: boolean; cep?: string | null; street?: string | null; number?: string | null; complement?: string | null; neighborhood?: string | null; city?: string | null; state?: string | null; birth_date?: string | null }) {
+    const cid = await getCompanyIdOrThrow()
     const { data, error } = await supabase
       .from('customers')
       .insert({
+        company_id: cid,
         full_name: input.full_name,
         email: input.email ?? null,
         phone: input.phone ?? null,
@@ -102,13 +116,15 @@ export const apiProducts = {
     const from = page * pageSize
     const to = from + pageSize - 1
     let q = supabase.from('products_with_stock').select('*', { count: 'exact' }).order(sortBy, { ascending: sortDir === 'asc' }).range(from, to)
-    if (query && query.trim()) q = q.or(`sku.ilike.%${query}%,name.ilike.%${query}%,category.ilike.%${query}%`)
+  if (query && query.trim()) q = q.or(`sku.ilike.%${query}%,name.ilike.%${query}%`)
     const { data, error, count } = await q
     if (error) throw error
     return { data: data ?? [], count: count ?? 0 }
   },
   async create(input: { sku: string; name: string; category?: string | null; unit_cost?: number; unit_price: number; reorder_level?: number; categories?: string[]; tags?: string[] }) {
+    const cid = await getCompanyIdOrThrow()
     const { data, error } = await supabase.from('products').insert({
+      company_id: cid,
       sku: input.sku,
       name: input.name,
       category: input.category ?? null,
@@ -204,19 +220,21 @@ export const apiServices = {
     }))
     return { data: rows, count: count ?? 0 }
   },
-  async create(input: { sku?: string; name: string; category?: string | null; unit_price: number; categories?: string[]; tags?: string[] }) {
+  async create(input: { sku?: string; name: string; unit_price: number; unit_cost?: number; categories?: string[]; tags?: string[] }) {
+    const cid = await getCompanyIdOrThrow()
     const { data, error } = await supabase.from('services').insert({
+      company_id: cid,
       sku: input.sku ?? null,
       name: input.name,
-      category: input.category ?? null,
       unit_price: input.unit_price,
+      unit_cost: input.unit_cost ?? 0,
       categories: input.categories ?? null,
       tags: input.tags ?? null,
     }).select('*').single()
     if (error) throw error
     return data
   },
-  async update(id: string, input: Partial<{ sku?: string; name: string; category?: string | null; unit_price: number; categories?: string[]; tags?: string[] }>) {
+  async update(id: string, input: Partial<{ sku?: string; name: string; unit_price: number; unit_cost?: number; categories?: string[]; tags?: string[] }>) {
     const { data, error } = await supabase.from('services').update(input).eq('id', id).select('*').single()
     if (error) throw error
     return data
@@ -275,7 +293,9 @@ export const apiTechnicians = {
     return { data: data ?? [], count: count ?? 0 }
   },
   async create(input: { full_name: string; email?: string | null; phone?: string | null; notes?: string | null; is_active?: boolean; cep?: string | null; street?: string | null; number?: string | null; complement?: string | null; neighborhood?: string | null; city?: string | null; state?: string | null }) {
+    const cid = await getCompanyIdOrThrow()
     const { data, error } = await supabase.from('technicians').insert({
+      company_id: cid,
       full_name: input.full_name,
       email: input.email ?? null,
       phone: input.phone ?? null,
@@ -353,9 +373,11 @@ export const apiOrders = {
   },
   async create(input: NewOrderInput) {
     // 1) create base order
+    const cid = await getCompanyIdOrThrow()
     const { data: order, error } = await supabase
       .from('service_orders')
       .insert({
+        company_id: cid,
         customer_id: input.customer_id,
         device_id: input.device_id ?? null,
         problem_description: input.problem_description,
@@ -380,6 +402,7 @@ export const apiOrders = {
           const { data: createdDevice, error: devErr } = await supabase
             .from('devices')
             .insert({
+              company_id: cid,
               customer_id: input.customer_id,
               brand: d.brand!,
               model: d.model!,
@@ -405,6 +428,7 @@ export const apiOrders = {
     if (input.items && input.items.length) {
       for (const it of input.items) {
         const payload: any = {
+          company_id: cid,
           service_order_id: orderId,
           product_id: it.product_id ?? null,
           description: it.description,
@@ -474,9 +498,11 @@ export const apiOrders = {
       for (const d of input.devices) {
         let deviceId = d.device_id ?? null
         if (!deviceId && (d.brand && d.model)) {
+          const cid = await getCompanyIdOrThrow()
           const { data: createdDevice, error: devErr } = await supabase
             .from('devices')
             .insert({
+              company_id: cid,
               customer_id: (updated as any).customer_id,
               brand: d.brand!,
               model: d.model!,
@@ -504,6 +530,7 @@ export const apiOrders = {
       if (delItemsErr) throw delItemsErr
       for (const it of input.items) {
         const payload: any = {
+          company_id: await getCompanyIdOrThrow(),
           service_order_id: id,
           product_id: it.product_id ?? null,
           description: it.description,
@@ -535,9 +562,11 @@ export const apiOrders = {
 // DEVICES
 export const apiDevices = {
   async create(input: { brand: string; model: string; imei?: string | null; color?: string | null; notes?: string | null }) {
+    const cid = await getCompanyIdOrThrow()
     const { data, error } = await supabase
       .from('devices')
       .insert({
+        company_id: cid,
         brand: input.brand,
         model: input.model,
         imei: input.imei ?? null,
@@ -559,7 +588,9 @@ export const apiCash = {
     return data
   },
   async openSession(input: { opening_amount?: number; notes?: string | null; opened_by?: string | null }) {
+    const cid = await getCompanyIdOrThrow()
     const { data, error } = await supabase.from('cash_sessions').insert({
+      company_id: cid,
       opening_amount: input.opening_amount ?? 0,
       notes: input.notes ?? null,
       opened_by: input.opened_by ?? null,
@@ -581,7 +612,9 @@ export const apiCash = {
     return { data: data ?? [], count: count ?? 0 }
   },
   async addManualMovement(input: { cash_session_id: string; type: 'DEPOSIT' | 'WITHDRAWAL' | 'ADJUSTMENT'; amount: number; notes?: string | null }) {
+    const cid = await getCompanyIdOrThrow()
     const { data, error } = await supabase.from('cash_movements').insert({
+      company_id: cid,
       cash_session_id: input.cash_session_id,
       type: input.type,
       amount: input.amount,
@@ -605,10 +638,11 @@ export const apiCash = {
     return payments?.length ?? 0
   },
   async closeSession(sessionId: string, closedBy?: string | null) {
-    const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/close-cash-session?sessionId=${encodeURIComponent(sessionId)}${closedBy ? `&closedBy=${encodeURIComponent(closedBy)}` : ''}`
-    const res = await fetch(url, { method: 'POST' })
-    if (!res.ok) throw new Error(await res.text())
-    return (await res.json()) as { url?: string }
+    const { data, error } = await supabase.functions.invoke('close-cash-session', {
+      body: { sessionId, closedBy: closedBy ?? null },
+    })
+    if (error) throw new Error((error as any)?.message ?? 'Falha ao fechar o caixa')
+    return (data ?? {}) as { url?: string }
   },
 }
 
@@ -844,9 +878,11 @@ export const apiSuppliers = {
     return { data: data ?? [], count: count ?? 0 }
   },
   async create(input: { name: string; email?: string | null; phone?: string | null; notes?: string | null; is_active?: boolean; cep?: string | null; street?: string | null; number?: string | null; complement?: string | null; neighborhood?: string | null; city?: string | null; state?: string | null }) {
+    const cid = await getCompanyIdOrThrow()
     const { data, error } = await supabase
       .from('suppliers')
       .insert({
+        company_id: cid,
         name: input.name,
         email: input.email ?? null,
         phone: input.phone ?? null,
@@ -973,20 +1009,14 @@ export const apiBilling = {
     return { subscription: sub ?? null, invoices: invoices ?? [], customer: customer ?? null }
   },
   async createPortalSession() {
-    const token = (await supabase.auth.getSession()).data.session?.access_token ?? ''
-    const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/stripe-portal`
-    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ action: 'portal' }) })
-    const json = await res.json()
-    if (!res.ok) throw new Error(json?.error || 'Falha ao criar portal')
-    return json as { url: string }
+    const { data, error } = await supabase.functions.invoke('stripe-portal', { body: { action: 'portal' } })
+    if (error) throw new Error((error as any)?.message ?? 'Falha ao criar portal')
+    return data as { url: string }
   },
   async createCheckoutSession() {
-    const token = (await supabase.auth.getSession()).data.session?.access_token ?? ''
-    const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/stripe-portal`
-    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ action: 'checkout' }) })
-    const json = await res.json()
-    if (!res.ok) throw new Error(json?.error || 'Falha ao criar checkout')
-    return json as { url: string }
+    const { data, error } = await supabase.functions.invoke('stripe-portal', { body: { action: 'checkout' } })
+    if (error) throw new Error((error as any)?.message ?? 'Falha ao criar checkout')
+    return data as { url: string }
   },
 }
 
@@ -1027,9 +1057,11 @@ export const apiEmployees = {
     return { data, count }
   },
   async create(input: { full_name?: string; email: string; password: string; phone?: string | null; is_active?: boolean; job_title?: string | null; cpf?: string | null; cep?: string | null; street?: string | null; number?: string | null; complement?: string | null; neighborhood?: string | null; city?: string | null; state?: string | null; birth_date?: string | null; hire_date?: string | null; notes?: string | null }) {
-    const res = await fetch('/functions/v1/create-employee', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${(await supabase.auth.getSession()).data.session?.access_token ?? ''}` }, body: JSON.stringify(input) })
-    if (!res.ok) throw new Error((await res.json()).error ?? 'Falha ao criar funcionário')
-    return await res.json()
+    // Ensure multitenancy: include company_id in the payload
+    const company_id = await getCompanyIdOrThrow()
+    const { data, error } = await supabase.functions.invoke('create-employee', { body: { ...input, company_id } })
+    if (error) throw new Error((error as any)?.message ?? 'Falha ao criar funcionário')
+    return data
   },
   async update(id: string, patch: { full_name?: string; phone?: string | null; is_active?: boolean; job_title?: string | null; cpf?: string | null; cep?: string | null; street?: string | null; number?: string | null; complement?: string | null; neighborhood?: string | null; city?: string | null; state?: string | null; birth_date?: string | null; hire_date?: string | null; notes?: string | null }) {
     const { data, error } = await supabase.from('users').update(patch).eq('id', id).select('*').single()

@@ -5,6 +5,8 @@ import { Outlet, useLocation } from "react-router-dom";
 import { AppSidebar } from "../common/AppSidebar";
 import { SiteHeader } from "../common/SiteHeader";
 import { useAuth } from "@/app/auth/AuthProvider";
+import { useEffect, useMemo, useState } from "react";
+import { apiCompanies } from "@/lib/api";
 
 const AppRoutes = {
   Dashboard: "/app/dashboard",
@@ -25,15 +27,46 @@ export default function AppLayout() {
   const { pathname } = useLocation();
   const { user } = useAuth();
 
-  const displayName =
+  const [companyName, setCompanyName] = useState<string>("Minha Empresa");
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const c = await apiCompanies.getMyCompany();
+        if (c?.name) setCompanyName(c.name as string);
+      } catch (_e) {
+        // ignore, keep default; the guard will ensure user has a company
+      }
+    })();
+  }, []);
+
+  const displayNameRaw =
     (user?.user_metadata as any)?.full_name ||
     (user?.user_metadata as any)?.name ||
     (user?.email ? String(user.email).split("@")[0] : "Usuário");
+  const displayName = useMemo(() => {
+    const parts = String(displayNameRaw).trim().split(/\s+/).filter(Boolean)
+    if (parts.length <= 2) return displayNameRaw
+    // Prefer first + last for display
+    return `${parts[0]} ${parts[parts.length - 1]}`
+  }, [displayNameRaw])
   const email = user?.email ?? "";
   const avatar =
     (user?.user_metadata as any)?.avatar_url ||
     (user?.user_metadata as any)?.picture ||
     `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}`;
+
+  const companyInitials = useMemo(() => {
+    const parts = String(companyName).trim().split(/\s+/).filter(Boolean);
+    const first = parts[0]?.[0] || ''
+    const last = parts.length > 1 ? parts[parts.length - 1]?.[0] : ''
+    const letters = `${first}${last}`.toUpperCase()
+    return letters || (displayName?.[0]?.toUpperCase() ?? "C");
+  }, [companyName, displayName]);
+
+  const CompanyLogo = ({ className }: { className?: string }) => (
+    <span className={`inline-flex items-center justify-center ${className ?? ""}`}>{companyInitials}</span>
+  );
 
   const sidebarData = {
     user: {
@@ -43,8 +76,8 @@ export default function AppLayout() {
     },
     teams: [
       {
-        name: 'RCelulares',
-        logo: LayoutDashboard,
+        name: companyName,
+        logo: CompanyLogo,
         plan: 'Studio',
       },
     ],

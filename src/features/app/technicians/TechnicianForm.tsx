@@ -77,6 +77,27 @@ export function TechnicianForm({ open, onOpenChange, initial, loading, onSubmit 
     })
   }
   const maskCEP = (raw: string) => raw.replace(/\D/g, '').slice(0, 8).replace(/(\d{5})(\d{0,3})/, (_, p1, p2) => (p2 ? `${p1}-${p2}` : p1))
+  const maskPhone = (raw: string) => {
+    const d = raw.replace(/\D/g, '').slice(0, 11)
+    if (d.length <= 10) {
+      // (00) 0000-0000
+      return d.replace(/(\d{0,2})(\d{0,4})(\d{0,4}).*/, (_m, a, b, c) => {
+        let out = ''
+        if (a) out += `(${a}` + (a.length === 2 ? ')' : '')
+        if (b) out += (a ? ' ' : '') + b
+        if (c) out += (b.length ? '-' : '') + c
+        return out
+      })
+    }
+    // (00) 00000-0000
+    return d.replace(/(\d{0,2})(\d{0,5})(\d{0,4}).*/, (_m, a, b, c) => {
+      let out = ''
+      if (a) out += `(${a}` + (a.length === 2 ? ')' : '')
+      if (b) out += (a ? ' ' : '') + b
+      if (c) out += (b.length ? '-' : '') + c
+      return out
+    })
+  }
 
   async function lookupCep() {
     const cepDigits = (form.cep || '').replace(/\D/g, '')
@@ -110,8 +131,8 @@ export function TechnicianForm({ open, onOpenChange, initial, loading, onSubmit 
       <>
         <CustomInput name="full_name" label="Nome" value={form.full_name} onChange={(v) => change('full_name', v)} required disabled={loading} error={errors.full_name} />
         <div className="grid md:grid-cols-2 gap-4">
-          <CustomInput name="email" label="E-mail" value={form.email} onChange={(v) => change('email', v)} disabled={loading} />
-          <CustomInput name="phone" label="Telefone" value={form.phone} onChange={(v) => change('phone', v)} disabled={loading} />
+          <CustomInput name="email" label="E-mail" value={form.email} onChange={(v) => change('email', v)} disabled={loading} placeholder="contato@empresa.com" />
+          <CustomInput name="phone" label="Telefone" value={form.phone} onChange={(v) => change('phone', v)} required disabled={loading} mask={maskPhone} placeholder="(00) 00000-0000"  />
         </div>
         <CustomCheckbox name="is_active" value={!!form.is_active} label="Ativo" disabled={loading} onChange={(v) => change('is_active', v)} />
 
@@ -131,6 +152,7 @@ export function TechnicianForm({ open, onOpenChange, initial, loading, onSubmit 
               onChange={(v) => change('cep', v)}
               onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void lookupCep() } }}
               mask={maskCEP}
+              instruction="Digite o CEP e pressione Enter para buscar"
             />
             <CustomInput name="number" label="Número" value={form.number} onChange={(v) => change('number', v)} />
           </div>
@@ -142,7 +164,7 @@ export function TechnicianForm({ open, onOpenChange, initial, loading, onSubmit 
             <CustomInput name="city" label="Cidade" value={form.city} onChange={(v) => change('city', v)} />
           </div>
           <div className="grid md:grid-cols-[1fr_auto] gap-4">
-            <CustomInput name="state" label="UF" value={form.state} onChange={(v) => change('state', v.toUpperCase().slice(0, 2))} />
+            <CustomInput name="state" label="UF" value={form.state} onChange={(v) => change('state', v.toUpperCase().slice(0, 2))}  />
             <CustomInput name="complement" label="Complemento" value={form.complement} onChange={(v) => change('complement', v)} />
           </div>
         </CustomInputGroup>

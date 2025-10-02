@@ -11,7 +11,7 @@ import CustomInputGroup from '@/components/custom/Input/CustomInputGroup'
 export type ProductFormProps = {
   open: boolean
   onOpenChange?: (open: boolean) => void
-  initial?: { id?: string; sku?: string; name?: string; category?: string | null; unit_cost?: number; unit_price?: number; reorder_level?: number }
+  initial?: { id?: string; sku?: string; name?: string; category?: string | null; unit_cost?: number; unit_price?: number; reorder_level?: number; categories?: string[] | null; tags?: string[] | null }
   loading?: boolean
   onSubmit: (data: { sku: string; name: string; category?: string | null; unit_cost?: number; unit_price: number; reorder_level?: number; categories?: string[]; tags?: string[] }) => Promise<void>
 }
@@ -38,10 +38,10 @@ export function ProductForm({ open, onOpenChange, initial, loading, onSubmit }: 
       unit_cost: initial?.unit_cost ?? 0,
       unit_price: initial?.unit_price ?? 0,
       reorder_level: initial?.reorder_level ?? 0,
-      categories: '',
-      tags: '',
+      categories: Array.isArray(initial?.categories) ? (initial!.categories as string[]).join(', ') : '',
+      tags: Array.isArray(initial?.tags) ? (initial!.tags as string[]).join(', ') : '',
     })
-  }, [initial?.sku, initial?.name, initial?.category, initial?.unit_cost, initial?.unit_price, initial?.reorder_level])
+  }, [initial?.sku, initial?.name, initial?.category, initial?.unit_cost, initial?.unit_price, initial?.reorder_level, Array.isArray(initial?.categories) ? initial?.categories?.join('|') : '', Array.isArray(initial?.tags) ? initial?.tags?.join('|') : ''])
 
   // Load suppliers on edit
   useEffect(() => {
@@ -67,7 +67,7 @@ export function ProductForm({ open, onOpenChange, initial, loading, onSubmit }: 
         if (p.sku && p.sku.trim()) return p
         // Simple SKU: PROD-<6 uppercase alnum>
         const rand = Math.random().toString(36).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6)
-        return { ...p, sku: `PROD-${rand}` }
+        return { ...p, sku: `P-${rand}` }
       })
     }
   }, [initial?.id])

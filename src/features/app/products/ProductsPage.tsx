@@ -6,6 +6,8 @@ import { apiProducts } from '@/lib/api'
 import { ProductForm } from './ProductForm'
 import { formatBRL } from '@/lib/format'
 import { apiProductSuppliers } from '@/lib/api'
+import { Badge } from '@/components/ui/badge'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 type Product = {
   id: string
@@ -17,6 +19,8 @@ type Product = {
   reorder_level: number
   created_at: string
   stock_qty?: number
+  categories?: string[] | null
+  tags?: string[] | null
 }
 
 export default function ProductsPage() {
@@ -57,7 +61,7 @@ export default function ProductsPage() {
   async function onRemoveItens(items: Product[]) {
     try {
       const removed = await apiProducts.removeMany(items.map((i) => i.id))
-      toast.success(`${removed} produto(s) removido(s)`) ; setSelected([]); fetchData()
+      toast.success(`${removed} produto(s) removido(s)`); setSelected([]); fetchData()
     } catch (e: any) { toast.error(e?.message ?? 'Falha ao remover') }
   }
 
@@ -80,7 +84,7 @@ export default function ProductsPage() {
       if (productId && Array.isArray(buffer) && buffer.length >= 0) {
         await apiProductSuppliers.replaceAll(productId, buffer)
       }
-      ;(window as any).__productSuppliersBuffer = undefined
+      ; (window as any).__productSuppliersBuffer = undefined
       setOpenForm(false); setEditing(null); fetchData()
     } catch (e: any) { toast.error(e?.message ?? 'Falha ao salvar') }
   }
@@ -93,14 +97,71 @@ export default function ProductsPage() {
     delete: ((row: Record<string, any>) => { (async () => { try { await apiProducts.remove((row as Product).id); toast.success('Produto removido'); fetchData() } catch (e: any) { toast.error(e?.message ?? 'Falha ao remover') } })() }) as (row: Record<string, any>) => void,
   }), [])
 
+  const CategoriesCell: React.FC<{ row: Product }> = ({ row }) => {
+    const list = Array.isArray(row.categories) ? row.categories.filter(Boolean) : []
+    if (!list.length) return <>-</>
+    const visible = list.slice(0, 3)
+    const hidden = list.slice(3)
+    return (
+      <div className="flex gap-1">
+        {visible.map((c, i) => (<Badge key={`${c}-${i}`} variant="outline">{c}</Badge>))}
+        {hidden.length > 0 && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Badge variant="outline">+{hidden.length}</Badge>
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={6}>
+              <div className="flex flex-row items-center gap-1 whitespace-nowrap">
+                {hidden.map((c, i) => (
+                  <Badge key={`h-${c}-${i}`} variant="outline" className="bg-background text-foreground">
+                    {c}
+                  </Badge>
+                ))}
+              </div>
+            </TooltipContent>
+          </Tooltip>
+        )}
+      </div>
+    )
+  }
+
+  const TagsCell: React.FC<{ row: Product }> = ({ row }) => {
+    const list = Array.isArray(row.tags) ? row.tags.filter(Boolean) : []
+    if (!list.length) return <>-</>
+    const visible = list.slice(0, 3)
+    const hidden = list.slice(3)
+    return (
+      <div className="flex  gap-1">
+        {visible.map((t, i) => (<Badge key={`${t}-${i}`} variant="outline">{t}</Badge>))}
+        {hidden.length > 0 && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Badge variant="outline">+{hidden.length}</Badge>
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={6}>
+              <div className="flex flex-row items-center gap-1 whitespace-nowrap">
+                {hidden.map((t, i) => (
+                  <Badge key={`h-${t}-${i}`} variant="outline" className="bg-background text-foreground">
+                    {t}
+                  </Badge>
+                ))}
+              </div>
+            </TooltipContent>
+          </Tooltip>
+        )}
+      </div>
+    )
+  }
+
   const columns: IColumns<Product>[] = [
     { label: 'SKU', field: 'sku', sortable: true },
     { label: 'Nome', field: 'name', sortable: true },
-    { label: 'Categoria', field: 'category', sortable: true, format: (v) => v ?? '-' },
     { label: 'Custo', field: 'unit_cost', sortable: true, format: (v) => formatBRL(Number(v) || 0) },
     { label: 'Preço', field: 'unit_price', sortable: true, format: (v) => formatBRL(Number(v) || 0) },
     { label: 'Margem', field: 'unit_price', sortable: false, format: (_v, row) => formatBRL((Number(row.unit_price || 0) - Number(row.unit_cost || 0))) },
-  { label: 'Estoque', field: 'stock_qty', sortable: true, format: (v) => String(v ?? 0) },
+    { label: 'Estoque', field: 'stock_qty', sortable: true, format: (v) => String(v ?? 0) },
+    { label: 'Categorias', field: 'categories', sortable: false, component: CategoriesCell },
+    { label: 'Tags', field: 'tags', sortable: false, component: TagsCell },
     { label: 'Criado em', field: 'created_at', sortable: true, format: (v) => new Date(v).toLocaleString('pt-BR') },
   ]
 

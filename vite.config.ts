@@ -13,7 +13,7 @@ export default defineConfig({
       registerType: "autoUpdate",
       workbox: { globPatterns: ["**/*.{js,css,html,ico,png,svg}"] },
       manifest: {
-        name: "Oficina de Conserto",
+        name: "MobiFix",
         short_name: "Oficina",
         start_url: "/",
         display: "standalone",

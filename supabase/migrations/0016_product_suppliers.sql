@@ -31,12 +31,19 @@ create index if not exists product_suppliers_supplier_idx on public.product_supp
 -- RLS
 alter table public.product_suppliers enable row level security;
 
--- Policies (read for all auth, write for auth)
-create policy if not exists "product_suppliers_select" on public.product_suppliers
+-- Policies (read for all auth, write for auth) - compatible with Postgres versions without IF NOT EXISTS
+drop policy if exists "product_suppliers_select" on public.product_suppliers;
+create policy "product_suppliers_select" on public.product_suppliers
   for select to authenticated using (true);
-create policy if not exists "product_suppliers_insert" on public.product_suppliers
+
+drop policy if exists "product_suppliers_insert" on public.product_suppliers;
+create policy "product_suppliers_insert" on public.product_suppliers
   for insert to authenticated with check (true);
-create policy if not exists "product_suppliers_update" on public.product_suppliers
+
+drop policy if exists "product_suppliers_update" on public.product_suppliers;
+create policy "product_suppliers_update" on public.product_suppliers
   for update to authenticated using (true) with check (true);
-create policy if not exists "product_suppliers_delete" on public.product_suppliers
+
+drop policy if exists "product_suppliers_delete" on public.product_suppliers;
+create policy "product_suppliers_delete" on public.product_suppliers
   for delete to authenticated using (true);

@@ -58,12 +58,10 @@ export function SupplierForm({ open, onOpenChange, initial, loading, onSubmit }:
     e.preventDefault()
     const newErrors: { name?: string; email?: string; phone?: string } = {}
     if (!form.name || !form.name.trim()) newErrors.name = 'Nome é obrigatório'
-    if (!form.email || !form.email.trim()) {
-      newErrors.email = 'E-mail é obrigatório'
-    } else {
+    if (!!form.email?.trim()) {
       const emailOk = /[^\s@]+@[^\s@]+\.[^\s@]+/.test(form.email)
       if (!emailOk) newErrors.email = 'E-mail inválido'
-    }
+    } 
     if (!form.phone || !form.phone.trim()) newErrors.phone = 'Telefone é obrigatório'
 
     if (Object.values(newErrors).some(Boolean)) {
@@ -129,7 +127,7 @@ export function SupplierForm({ open, onOpenChange, initial, loading, onSubmit }:
           <div className="grid gap-4">
             <CustomInput name="name" label="Nome" value={form.name} onChange={(v) => handleChange('name', v)} disabled={loading} required error={errors.name} />
             <div className="grid md:grid-cols-2 gap-4">
-              <CustomInput name="email" label="E-mail" value={form.email} onChange={(v) => handleChange('email', v)} disabled={loading} required error={errors.email} />
+              <CustomInput name="email" label="E-mail" value={form.email} onChange={(v) => handleChange('email', v)} disabled={loading} error={errors.email} />
               <CustomInput name="phone" label="Telefone" value={form.phone} onChange={(v) => handleChange('phone', v)} disabled={loading} required error={errors.phone} mask={maskPhone} />
             </div>
             <CustomCheckbox name="is_active" value={!!form.is_active} label="Ativo" onChange={(v) => handleChange('is_active', v)} />

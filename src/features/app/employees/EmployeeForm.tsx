@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import CustomForm from '@/components/custom/Input/CustomForm'
 import CustomInput from '@/components/custom/Input/CustomInput'
 import CustomInputGroup from '@/components/custom/Input/CustomInputGroup'
+import CustomDatePicker from '@/components/custom/Input/CustomDatePicker'
+import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { toast } from 'sonner'
@@ -123,6 +125,7 @@ export function EmployeeForm({ open, onOpenChange, initial, onSubmit }: { open: 
     }
 
     async function submit(e: React.FormEvent) {
+        console.log(form)
         e.preventDefault()
         const next: typeof errors = {}
         if (!form.email) next.email = 'Email é obrigatório'
@@ -164,14 +167,27 @@ export function EmployeeForm({ open, onOpenChange, initial, onSubmit }: { open: 
                 <div className="grid gap-4">
                     <CustomInput name="full_name" label="Nome" value={form.full_name} onChange={(v) => change('full_name', v)} />
                     <div className="grid md:grid-cols-2 gap-4">
-                        <CustomInput name="email" label="Email" value={form.email} onChange={(v) => change('email', v)} />
+                        <CustomInput
+                            name="email"
+                            label="Email"
+                            value={form.email}
+                            onChange={(v) => change('email', v)}
+                            instruction="Será utilizado como usuário de acesso ao sistema."
+                        />
                         {!isEdit && (
-                            <CustomInput name="password" label="Senha" type="password" value={form.password} onChange={(v) => change('password', v)} />
+                            <CustomInput
+                                name="password"
+                                label="Senha"
+                                type="password"
+                                value={form.password}
+                                onChange={(v) => change('password', v)}
+                                instruction="Defina a senha que o funcionário usará para acessar."
+                            />
                         )}
                     </div>
+                    <Separator className="my-2" />
                     <div className="grid md:grid-cols-2 gap-4">
                         <CustomInput name="phone" label="Telefone" value={form.phone} onChange={(v) => change('phone', v)} mask={maskPhone} />
-                        <CustomInput name="job_title" label="Cargo" value={form.job_title} onChange={(v) => change('job_title', v)} />
                     </div>
                     <div className="grid gap-2">
                         <div className="flex items-center gap-3">
@@ -179,15 +195,26 @@ export function EmployeeForm({ open, onOpenChange, initial, onSubmit }: { open: 
                             <label htmlFor="is_active" className="text-sm">Ativo</label>
                         </div>
                     </div>
+                    <Separator className="my-2" />
                     <div className="grid md:grid-cols-2 gap-4">
                         <CustomInput name="cpf" label="CPF" value={form.cpf} onChange={(v) => change('cpf', v)} mask={maskCPF} />
-                        <CustomInput name="birth_date" label="Nascimento" type="date" value={form.birth_date} onChange={(v) => change('birth_date', v)} />
+                        <CustomDatePicker
+                          name="birth_date"
+                          label="Nascimento"
+                          value={form.birth_date}
+                          onChange={(v) => change('birth_date', v)}
+                        >
+                          <div className="px-3 py-2 text-xs text-muted-foreground">
+                            Use esta data para lembrarmos do aniversário futuramente.
+                          </div>
+                        </CustomDatePicker>
                     </div>
                     <div className="grid md:grid-cols-2 gap-4">
-                        <CustomInput name="hire_date" label="Admissão" type="date" value={form.hire_date} onChange={(v) => change('hire_date', v)} />
+                        <CustomDatePicker name="hire_date" label="Admissão" value={form.hire_date} onChange={(v) => change('hire_date', v)} />
                     </div>
                 </div>
 
+                <Separator className="my-2" />
                 <CustomInputGroup label="Endereço">
                     <div className="grid md:grid-cols-2 gap-4">
                         <CustomInput

@@ -2,10 +2,29 @@ import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { CustomTable } from '@/components/custom/Table/CustomTable'
 import type { IColumns, IPagination } from '@/types'
+import { CheckCircle2, XCircle } from 'lucide-react'
+import NameWithAvatar from '@/components/common/NameWithAvatar'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { apiEmployees } from '@/lib/api'
 import EmployeeForm from './EmployeeForm.tsx'
 
-type Employee = { id: string; full_name?: string | null; email: string; phone?: string | null; is_active?: boolean; job_title?: string | null; created_at: string }
+type Employee = {
+  id: string
+  full_name?: string | null
+  email: string
+  phone?: string | null
+  is_active?: boolean
+  job_title?: string | null
+  created_at: string
+  // address fields
+  cep?: string | null
+  street?: string | null
+  number?: string | null
+  complement?: string | null
+  neighborhood?: string | null
+  city?: string | null
+  state?: string | null
+}
 
 export default function EmployeesPage() {
   const [pagination, setPagination] = useState<IPagination>({
@@ -47,16 +66,61 @@ export default function EmployeesPage() {
     delete: ((row: Record<string, any>) => { (async () => { try { await apiEmployees.remove((row as Employee).id); toast.success('Funcionário removido'); fetchData() } catch (e: any) { toast.error(e?.message ?? 'Falha ao remover') } })() }) as (row: Record<string, any>) => void,
   }), [])
 
+  const StatusCell: React.FC<{ row: Employee }> = ({ row }) => (
+    <div className="flex items-center ml-4 gap-1">
+      {row.is_active ? (
+        <CheckCircle2 className="h-4 w-4 text-green-600" aria-label="Ativo" />
+      ) : (
+        <XCircle className="h-4 w-4 text-red-600" aria-label="Inativo" />
+      )}
+      <span className="sr-only">{row.is_active ? 'Ativo' : 'Inativo'}</span>
+    </div>
+  )
+
+  const NameCell: React.FC<{ row: Employee }> = ({ row }) => (
+    <NameWithAvatar name={row.full_name || '-'} />
+  )
+
+  const AddressCell: React.FC<{ row: Employee }> = ({ row }) => {
+    const street = row.street?.trim()
+    const number = row.number?.trim()
+    const cep = row.cep?.trim()
+    const neighborhood = row.neighborhood?.trim()
+    const city = row.city?.trim()
+    const state = row.state?.trim()
+    // If no CEP, show '-' only and no tooltip
+    if (!cep) return <span>-</span>
+    const compactTop = street || '-'
+    const compactBottom = [number, cep].filter(Boolean).join(' • ')
+    const full = [
+      street && [street, number].filter(Boolean).join(', '),
+      neighborhood,
+      city && state ? `${city} - ${state}` : (city || state),
+      cep,
+    ].filter(Boolean).join(' • ')
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div className="flex flex-col leading-tight cursor-help max-w-[260px]">
+            <span className="truncate">{compactTop}</span>
+            <span className="text-xs text-muted-foreground truncate">{compactBottom}</span>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top" sideOffset={6}>{full}</TooltipContent>
+      </Tooltip>
+    )
+  }
+
   const columns: IColumns<Employee>[] = [
-    { label: 'Nome', field: 'full_name', sortable: true, format: (v) => v ?? '-' },
+    { label: 'Nome', field: 'full_name', sortable: true, component: NameCell },
     { label: 'Email', field: 'email', sortable: true },
-    { label: 'Telefone', field: 'phone', sortable: false, format: (v) => v ?? '-' },
-    { label: 'Cargo', field: 'job_title', sortable: false, format: (v) => v ?? '-' },
-    { label: 'Status', field: 'is_active', sortable: true, format: (v) => (v ? 'Ativo' : 'Inativo') },
+    { label: 'Endereço', field: 'street', sortable: false, component: AddressCell },
+    { label: 'Status', field: 'is_active', sortable: true, component: StatusCell },
     { label: 'Criado em', field: 'created_at', sortable: true, format: (v) => new Date(v).toLocaleString('pt-BR') },
   ]
 
   async function onSave(data: { id?: string; full_name?: string | null; email: string; password?: string; phone?: string | null; is_active?: boolean; job_title?: string | null; cpf?: string | null; cep?: string | null; street?: string | null; number?: string | null; complement?: string | null; neighborhood?: string | null; city?: string | null; state?: string | null; birth_date?: string | null; hire_date?: string | null; notes?: string | null }) {
+    console.log(data)
     try {
       if (editing) {
         await apiEmployees.update(editing.id, {

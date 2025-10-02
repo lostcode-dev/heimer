@@ -5,15 +5,19 @@ import type { IColumns, IPagination } from '@/types'
 import { apiServices, apiServiceTechnicians } from '@/lib/api'
 import { formatBRL } from '@/lib/format'
 import { ServiceForm } from './ServiceForm'
+import { Badge } from '@/components/ui/badge'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 type Service = {
   id: string
   sku: string | null
   name: string
-  category: string | null
   unit_price: number
+  unit_cost?: number
   created_at: string
   technicians?: string[]
+  categories?: string[] | null
+  tags?: string[] | null
 }
 
 export default function ServicesPage() {
@@ -54,11 +58,11 @@ export default function ServicesPage() {
   async function onRemoveItens(items: Service[]) {
     try {
       const removed = await apiServices.removeMany(items.map((i) => i.id))
-      toast.success(`${removed} serviço(s) removido(s)`) ; setSelected([]); fetchData()
+      toast.success(`${removed} serviço(s) removido(s)`); setSelected([]); fetchData()
     } catch (e: any) { toast.error(e?.message ?? 'Falha ao remover') }
   }
 
-  async function onSave(data: { sku?: string; name: string; category?: string | null; unit_price: number }) {
+  async function onSave(data: { sku?: string; name: string; unit_price: number; unit_cost?: number; categories?: string[]; tags?: string[] }) {
     try {
       let serviceId: string
       if (editing) {
@@ -75,7 +79,7 @@ export default function ServicesPage() {
       if (serviceId && Array.isArray(buffer)) {
         await apiServiceTechnicians.replaceAll(serviceId, buffer.map((t: any) => ({ technician_id: t.technician_id, technician_price: t.technician_price ?? null })))
       }
-      ;(window as any).__serviceTechniciansBuffer = undefined
+      ; (window as any).__serviceTechniciansBuffer = undefined
       setOpenForm(false); setEditing(null); fetchData()
     } catch (e: any) { toast.error(e?.message ?? 'Falha ao salvar') }
   }
@@ -88,12 +92,105 @@ export default function ServicesPage() {
     delete: ((row: Record<string, any>) => { (async () => { try { await apiServices.remove((row as Service).id); toast.success('Serviço removido'); fetchData() } catch (e: any) { toast.error(e?.message ?? 'Falha ao remover') } })() }) as (row: Record<string, any>) => void,
   }), [])
 
+  const CategoriesCell: React.FC<{ row: Service }> = ({ row }) => {
+    const list = Array.isArray(row.categories) ? row.categories.filter(Boolean) : []
+    if (!list.length) return <>-</>
+    const visible = list.slice(0, 3)
+    const hidden = list.slice(3)
+    return (
+      <div className="flex gap-1">
+        {visible.map((c, i) => (<Badge key={`${c}-${i}`} variant="outline">{c}</Badge>))}
+        {hidden.length > 0 && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Badge variant="outline">+{hidden.length}</Badge>
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={6}>
+              <div className="flex flex-row items-center gap-1 whitespace-nowrap">
+                {hidden.map((c, i) => (
+                  <Badge key={`h-${c}-${i}`} variant="outline" className="bg-background text-foreground">
+                    {c}
+                  </Badge>
+                ))}
+              </div>
+            </TooltipContent>
+          </Tooltip>
+        )}
+      </div>
+    )
+  }
+
+  const TagsCell: React.FC<{ row: Service }> = ({ row }) => {
+    const list = Array.isArray(row.tags) ? row.tags.filter(Boolean) : []
+    if (!list.length) return <>-</>
+    const visible = list.slice(0, 3)
+    const hidden = list.slice(3)
+    return (
+      <div className="flex gap-1">
+        {visible.map((t, i) => (<Badge key={`${t}-${i}`} variant="outline">{t}</Badge>))}
+        {hidden.length > 0 && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Badge variant="outline">+{hidden.length}</Badge>
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={6}>
+              <div className="flex flex-row items-center gap-1 whitespace-nowrap">
+                {hidden.map((t, i) => (
+                  <Badge key={`h-${t}-${i}`} variant="outline" className="bg-background text-foreground">
+                    {t}
+                  </Badge>
+                ))}
+              </div>
+            </TooltipContent>
+          </Tooltip>
+        )}
+      </div>
+    )
+  }
+
+  const TechniciansCell: React.FC<{ row: Service }> = ({ row }) => {
+    const list = Array.isArray(row.technicians) ? row.technicians.filter(Boolean) : []
+    if (!list.length) return <>-</>
+    const toBadge = (full: string) => {
+      const parts = full.trim().split(/\s+/)
+      const first = parts[0] ?? ''
+      const secondInitial = parts.length > 1 ? `${(parts[1] || '').charAt(0).toUpperCase()}` : ''
+      return `${first}${secondInitial ? ' ' + secondInitial : ''}`
+    }
+    const visible = list.slice(0, 3)
+    const hidden = list.slice(3)
+    return (
+      <div className="flex gap-1">
+        {visible.map((t, i) => (<Badge key={`${t}-${i}`} variant="secondary">{toBadge(t)}</Badge>))}
+        {hidden.length > 0 && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Badge variant="secondary">+{hidden.length}</Badge>
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={6}>
+              <div className="flex flex-row items-center gap-1 whitespace-nowrap">
+                {hidden.map((t, i) => (
+                  <Badge key={`h-${t}-${i}`} variant="secondary">
+                    {toBadge(t)}
+                  </Badge>
+                ))}
+              </div>
+            </TooltipContent>
+          </Tooltip>
+        )}
+      </div>
+    )
+  }
+
   const columns: IColumns<Service>[] = [
     { label: 'SKU', field: 'sku', sortable: true, format: (v) => v ?? '-' },
     { label: 'Nome', field: 'name', sortable: true },
-    { label: 'Categoria', field: 'category', sortable: true, format: (v) => v ?? '-' },
+    { label: 'Custo', field: 'unit_cost', sortable: true, format: (v) => formatBRL(Number(v) || 0) },
     { label: 'Preço', field: 'unit_price', sortable: true, format: (v) => formatBRL(Number(v) || 0) },
-  { label: 'Técnicos', field: 'technicians', sortable: false, format: (_v, row) => (row.technicians?.length ? row.technicians.join(', ') : '-') },
+    { label: 'Margem', field: 'unit_price', sortable: false, format: (_v, row) => formatBRL((Number(row.unit_price || 0) - Number(row.unit_cost || 0))) },
+    { label: 'Técnicos', field: 'technicians', sortable: false, component: TechniciansCell },
+    { label: 'Categorias', field: 'categories', sortable: false, component: CategoriesCell },
+    { label: 'Tags', field: 'tags', sortable: false, component: TagsCell },
     { label: 'Criado em', field: 'created_at', sortable: true, format: (v) => new Date(v).toLocaleString('pt-BR') },
   ]
 

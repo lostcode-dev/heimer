@@ -6,6 +6,9 @@ import { apiCash } from '@/lib/api'
 import { CustomTable } from '@/components/custom/Table/CustomTable'
 import type { IColumns, IPagination } from '@/types'
 import { MovementForm } from './MovementForm'
+import { ExpenseForm } from './ExpenseForm'
+import { InternalMovementForm } from './InternalMovementForm'
+import CustomInput from '@/components/custom/Input/CustomInput'
 
 export default function CashPage() {
   const [session, setSession] = useState<any | null>(null)
@@ -17,6 +20,9 @@ export default function CashPage() {
   })
   const [rows, setRows] = useState<any[]>([])
   const [selected, setSelected] = useState<any[]>([])
+  const [counted, setCounted] = useState<string>('')
+  const [openExpense, setOpenExpense] = useState(false)
+  const [openInternal, setOpenInternal] = useState(false)
 
   async function fetchSession() {
     const s = await apiCash.getOpenSession()
@@ -73,7 +79,8 @@ export default function CashPage() {
   async function closeSession() {
     if (!session?.id) return
     try {
-      const res = await apiCash.closeSession(session.id)
+      const countedAmount = Number((counted || '').replace(/[^0-9.,-]/g, '').replace(',', '.')) || undefined
+      const res = await apiCash.closeSession(session.id, { counted_amount: countedAmount, closedBy: null })
       toast.success('Caixa fechado')
       setSession(null)
       setRows([])
@@ -84,27 +91,40 @@ export default function CashPage() {
   const columns: IColumns<any>[] = [
     { label: 'Tipo', field: 'type', sortable: true },
     { label: 'Valor', field: 'amount', sortable: true, format: (v) => `R$ ${(Number(v)||0).toFixed(2)}` },
+    { label: 'Forma', field: 'method', sortable: true, format: (v) => v ?? '-' },
+    { label: 'Categoria', field: 'category', sortable: true, format: (v) => v ?? '-' },
     { label: 'Origem', field: 'reference_type', sortable: true },
     { label: 'Quando', field: 'occurred_at', sortable: true, format: (v) => new Date(v).toLocaleString('pt-BR') },
     { label: 'Obs', field: 'notes', sortable: false, format: (v) => v ?? '-' },
   ]
 
   const total = useMemo(() => rows.reduce((acc, r) => acc + Number(r.amount || 0), 0), [rows])
+  const byMethod = useMemo(() => {
+    const m: Record<string, number> = {}
+    for (const r of rows) { const k = r.method || '-'; m[k] = (m[k] || 0) + Number(r.amount || 0) }
+    return m
+  }, [rows])
 
   return (
     <section className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">Caixa {session ? 'aberto' : 'fechado'}</h2>
-        <div className="text-sm">Total: <span className="font-semibold">R$ {total.toFixed(2)}</span></div>
+        <div className="text-sm flex items-center gap-3">
+          <span>Total: <span className="font-semibold">R$ {total.toFixed(2)}</span></span>
+          <span className="text-muted-foreground">{Object.entries(byMethod).map(([k,v]) => `${k}: R$ ${v.toFixed(2)}`).join(' · ')}</span>
+        </div>
       </div>
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2 items-end">
         {!session && (
           <Button onClick={openSession} className="bg-emerald-600 hover:bg-emerald-700 focus-visible:ring-emerald-600">Abrir caixa</Button>
         )}
         {session && (
           <>
             <Button onClick={() => setOpenForm(true)}>Movimentação manual</Button>
+            <Button variant="outline" onClick={() => setOpenExpense(true)}>Registrar despesa</Button>
+            <Button variant="outline" onClick={() => setOpenInternal(true)}>Reforço/Sangria</Button>
             <Button variant="secondary" onClick={attachPending}>Anexar pagamentos em dinheiro</Button>
+            <CustomInput name="counted" label="Conferido em caixa (R$)" value={counted} onChange={setCounted} placeholder="Ex.: 980,00" />
             <Button variant="destructive" onClick={closeSession}>Fechar caixa</Button>
           </>
         )}
@@ -121,6 +141,8 @@ export default function CashPage() {
             onRequest={onRequest}
           />
           <MovementForm open={openForm} onOpenChange={setOpenForm} onSubmit={addMovement} />
+          <ExpenseForm open={openExpense} onOpenChange={setOpenExpense} onSubmit={async (d) => { if (!session?.id) return; try { await apiCash.addExpense({ cash_session_id: session.id, ...d }); toast.success('Despesa registrada'); setOpenExpense(false); void fetchMovements(session.id) } catch (e: any) { toast.error(e?.message ?? 'Falha ao registrar despesa') } }} />
+          <InternalMovementForm open={openInternal} onOpenChange={setOpenInternal} onSubmit={async (d) => { if (!session?.id) return; try { await apiCash.addInternal({ cash_session_id: session.id, ...d }); toast.success('Movimentação registrada'); setOpenInternal(false); void fetchMovements(session.id) } catch (e: any) { toast.error(e?.message ?? 'Falha ao registrar movimentação') } }} />
         </>
       ) : (
         <Card className="p-4 text-sm text-slate-500">Nenhuma movimentação. Abra o caixa para começar.</Card>

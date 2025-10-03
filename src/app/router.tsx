@@ -14,6 +14,7 @@ import ServicesPage from '../features/app/services/ServicesPage'
 import TechniciansPage from '../features/app/technicians/TechniciansPage'
 import SuppliersPage from '../features/app/suppliers/SuppliersPage'
 import InventoryPage from '../features/app/inventory/InventoryPage'
+import ProductDetailsPage from '../features/app/products/ProductDetailsPage'
 import CompanySettingsPage from '../features/app/settings/CompanySettingsPage'
 import BillingPage from '../features/app/settings/BillingPage'
 import OrdersPage from '../features/app/serviceOrders/OrdersPage'
@@ -23,6 +24,7 @@ import DashboardPage from '../features/app/dashboard/DashboardPage'
 import ReportsPage from '../features/app/reports/ReportsPage'
 import EmployeesPage from '../features/app/employees/EmployeesPage'
 import RemindersPage from '../features/app/reminders/RemindersPage'
+import SalesPage from '../features/app/sales/SalesPage'
 
 import CashPage from '../features/app/cash/CashPage'
 import AppLayout from '../components/layout/AppLayout'
@@ -49,6 +51,7 @@ const router = createBrowserRouter([
                     { path: 'dashboard', element: <DashboardPage /> },
                     { path: 'customers', element: <CustomersPage /> },
                     { path: 'products', element: <ProductsPage /> },
+                    { path: 'products/:sku', element: <ProductDetailsPage /> },
                     { path: 'services', element: <ServicesPage /> },
                     { path: 'technicians', element: <TechniciansPage /> },
                     { path: 'employees', element: <EmployeesPage /> },
@@ -59,6 +62,7 @@ const router = createBrowserRouter([
                     { path: 'orders/:id', element: <OrderDetailsPage /> },
                     { path: 'cash', element: <CashPage /> },
                     { path: 'reminders', element: <RemindersPage /> },
+                    { path: 'sales', element: <SalesPage /> },
                     { path: 'reports/overview', element: <ReportsPage /> },
                     { path: 'settings/company', element: <CompanySettingsPage /> },
                     { path: 'settings/billing', element: <BillingPage /> },

@@ -20,6 +20,8 @@ interface CustomFormProps {
   footer?: React.ReactNode;
   onOpenChange?: (open: boolean) => void;
   onSubmit?: (e: React.FormEvent) => void;
+  submitLabel?: string;
+  submitDisabled?: boolean;
 }
 
 export default function CustomForm({
@@ -30,6 +32,8 @@ export default function CustomForm({
   footer,
   onOpenChange,
   onSubmit,
+  submitLabel,
+  submitDisabled,
 }: CustomFormProps) {
   const isMobile = useIsMobile();
 
@@ -59,7 +63,9 @@ export default function CustomForm({
         <DrawerFooter>
           {footer || (
             <>
-              <Button type="submit" onClick={handleSubmit}>Salvar</Button>
+              <Button type="submit" onClick={handleSubmit} disabled={submitDisabled}>
+                {submitLabel ?? 'Salvar'}
+              </Button>
               <DrawerClose asChild>
                 <Button variant="outline">Cancelar</Button>
               </DrawerClose>

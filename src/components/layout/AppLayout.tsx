@@ -124,6 +124,7 @@ export default function AppLayout() {
           { title: 'Ordens de Serviço', url: AppRoutes.Orders },
           { title: 'Caixa', url: AppRoutes.Cash },
           { title: 'Estoque', url: AppRoutes.Inventory },
+          { title: 'Vendas', url: '/app/sales' },
         ],
       },
       {

@@ -121,6 +121,27 @@ export const apiProducts = {
     if (error) throw error
     return { data: data ?? [], count: count ?? 0 }
   },
+  async listAllWithStock() {
+    // Fetch all products with computed stock from view
+    let page = 0
+    const pageSize = 1000
+    const out: any[] = []
+    // Loop to avoid enormous payloads; stop when less than pageSize returned
+    while (true) {
+      const from = page * pageSize
+      const to = from + pageSize - 1
+      const { data, error } = await supabase
+        .from('products_with_stock')
+        .select('*')
+        .order('name', { ascending: true })
+        .range(from, to)
+      if (error) throw error
+      out.push(...(data ?? []))
+      if (!data || data.length < pageSize) break
+      page += 1
+    }
+    return out
+  },
   async create(input: { sku: string; name: string; category?: string | null; unit_cost?: number; unit_price: number; reorder_level?: number; categories?: string[]; tags?: string[] }) {
     const cid = await getCompanyIdOrThrow()
     const { data, error } = await supabase.from('products').insert({
@@ -139,6 +160,24 @@ export const apiProducts = {
   },
   async update(id: string, input: Partial<{ sku: string; name: string; category?: string | null; unit_cost?: number; unit_price: number; reorder_level?: number; categories?: string[]; tags?: string[] }>) {
     const { data, error } = await supabase.from('products').update(input).eq('id', id).select('*').single()
+    if (error) throw error
+    return data
+  },
+  async getById(id: string) {
+    const { data, error } = await supabase
+      .from('products_with_stock')
+      .select('*')
+      .eq('id', id)
+      .single()
+    if (error) throw error
+    return data
+  },
+  async getBySku(sku: string) {
+    const { data, error } = await supabase
+      .from('products_with_stock')
+      .select('*')
+      .eq('sku', sku)
+      .single()
     if (error) throw error
     return data
   },
@@ -624,6 +663,50 @@ export const apiCash = {
     if (error) throw error
     return data
   },
+  async addIncome(input: { cash_session_id: string; amount: number; method?: 'CASH' | 'CARD' | 'PIX' | 'TRANSFER'; notes?: string | null }) {
+    const cid = await getCompanyIdOrThrow()
+    const { data, error } = await supabase.from('cash_movements').insert({
+      company_id: cid,
+      cash_session_id: input.cash_session_id,
+      type: 'DEPOSIT',
+      amount: Math.abs(input.amount),
+      reference_type: 'MANUAL',
+      method: input.method ?? null,
+      notes: input.notes ?? 'Venda direta',
+    }).select('*').single()
+    if (error) throw error
+    return data
+  },
+  async addExpense(input: { cash_session_id: string; amount: number; category: 'FORNECEDOR' | 'OPERACIONAL' | 'OUTROS'; method?: 'CASH' | 'CARD' | 'PIX' | 'TRANSFER'; notes?: string | null }) {
+    const cid = await getCompanyIdOrThrow()
+    const { data, error } = await supabase.from('cash_movements').insert({
+      company_id: cid,
+      cash_session_id: input.cash_session_id,
+      type: 'WITHDRAWAL',
+      amount: -Math.abs(input.amount),
+      reference_type: 'MANUAL',
+      category: input.category,
+      method: input.method ?? null,
+      notes: input.notes ?? null,
+    }).select('*').single()
+    if (error) throw error
+    return data
+  },
+  async addInternal(input: { cash_session_id: string; kind: 'REFORCO' | 'SANGRIA'; amount: number; notes?: string | null }) {
+    const cid = await getCompanyIdOrThrow()
+    const type = input.kind === 'REFORCO' ? 'DEPOSIT' : 'WITHDRAWAL'
+    const amt = input.kind === 'REFORCO' ? Math.abs(input.amount) : -Math.abs(input.amount)
+    const { data, error } = await supabase.from('cash_movements').insert({
+      company_id: cid,
+      cash_session_id: input.cash_session_id,
+      type,
+      amount: amt,
+      reference_type: 'MANUAL',
+      notes: input.notes ?? (input.kind === 'REFORCO' ? 'Reforço de caixa' : 'Sangria'),
+    }).select('*').single()
+    if (error) throw error
+    return data
+  },
   async attachPendingCashPayments(sessionId: string) {
     const { data: payments, error } = await supabase
       .from('payments')
@@ -637,9 +720,18 @@ export const apiCash = {
     }
     return payments?.length ?? 0
   },
-  async closeSession(sessionId: string, closedBy?: string | null) {
+  async closeSession(sessionId: string, input?: { counted_amount?: number; closedBy?: string | null }) {
+    // Persist reconciliation values first
+    const patch: any = {}
+    if (typeof input?.counted_amount === 'number') {
+      patch.counted_amount = input.counted_amount
+    }
+    if (Object.keys(patch).length > 0) {
+      const { error: updErr } = await supabase.from('cash_sessions').update(patch).eq('id', sessionId)
+      if (updErr) throw updErr
+    }
     const { data, error } = await supabase.functions.invoke('close-cash-session', {
-      body: { sessionId, closedBy: closedBy ?? null },
+      body: { sessionId, closedBy: input?.closedBy ?? null },
     })
     if (error) throw new Error((error as any)?.message ?? 'Falha ao fechar o caixa')
     return (data ?? {}) as { url?: string }
@@ -813,6 +905,19 @@ export const apiInventory = {
       removed += 1
     }
     return removed
+  },
+  async listByProductPaginated(productId: string, params: { page: number; pageSize: number; sortBy?: string; sortDir?: 'asc' | 'desc' }) {
+    const { page, pageSize, sortBy = 'occurred_at', sortDir = 'desc' } = params
+    const from = page * pageSize
+    const to = from + pageSize - 1
+    const { data, error, count } = await supabase
+      .from('inventory_movements')
+      .select('*', { count: 'exact' })
+      .eq('product_id', productId)
+      .order(sortBy, { ascending: sortDir === 'asc' })
+      .range(from, to)
+    if (error) throw error
+    return { data: data ?? [], count: count ?? 0 }
   },
 }
 

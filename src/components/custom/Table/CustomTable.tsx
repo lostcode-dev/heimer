@@ -16,10 +16,13 @@ export function CustomTable({
   selected,
   loading = false,
   actions,
+  actionsLabels,
+  actionsIcons,
   onRowSelectionChange,
   onRequest,
   onAddItem,
   onRemoveItens,
+  extraActions,
 }: {
   data: Record<string, any>[];
   columns: IColumns[];
@@ -27,13 +30,17 @@ export function CustomTable({
   selected?: unknown[];
   loading: boolean;
   actions?: {
+    view?: (row: Record<string, any>) => void;
     update: (updatedData: Record<string, any>[]) => void;
     delete: (row: Record<string, any>) => void;
   };
+  actionsLabels?: { view?: string; update?: string; delete?: string };
+  actionsIcons?: { view?: React.ReactNode; update?: React.ReactNode; delete?: React.ReactNode };
   onRowSelectionChange?: any;
   onRequest: (updatedPagination: IPagination) => void;
   onAddItem?: () => void;
   onRemoveItens?: (selectedRows: unknown[]) => void;
+  extraActions?: React.ReactNode;
 }) {
   const [search, setSearch] = useState("");
 
@@ -76,6 +83,8 @@ export function CustomTable({
             icon={<Search size={16} />}
           />
           <div className="flex gap-2">
+            {extraActions}
+
             {onRemoveItens && (
               <Button
                 variant="outline"
@@ -121,6 +130,8 @@ export function CustomTable({
               selected={selected}
               loading={loading}
               actions={actions}
+              actionsLabels={actionsLabels}
+              actionsIcons={actionsIcons}
               onRowSelectionChange={onRowSelectionChange}
             />
           </Table>

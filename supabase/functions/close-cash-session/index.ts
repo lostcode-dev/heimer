@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Deno Edge Function: close-cash-session
 // Portuguese PDF content, English code identifiers
 
@@ -33,15 +34,24 @@ export async function handle(req: Request) {
   if (movErr) return new Response(movErr.message, { status: 500 })
   const closingAmount = (movements ?? []).reduce((acc, m) => acc + Number(m.amount), 0)
 
+  // Get counted amount (if provided previously)
+  const { data: sessionRow } = await supabase
+    .from('cash_sessions')
+    .select('counted_amount')
+    .eq('id', sessionId)
+    .maybeSingle()
+  const countedAmount = Number((sessionRow as any)?.counted_amount ?? 0)
+  const difference = (Number.isFinite(countedAmount) ? countedAmount : 0) - closingAmount
+
   // Update cash session
   const { error: updErr } = await supabase
     .from('cash_sessions')
-    .update({ closing_amount: closingAmount, closed_at: new Date().toISOString(), closed_by: closedBy })
+    .update({ closing_amount: closingAmount, closed_at: new Date().toISOString(), closed_by: closedBy, difference })
     .eq('id', sessionId)
   if (updErr) return new Response(updErr.message, { status: 500 })
 
   // Generate simple PDF (placeholder text in Portuguese) and store to Storage bucket 'reports'
-  const pdfContent = new TextEncoder().encode(`Relatório Z\nSessão: ${sessionId}\nTotal: R$ ${closingAmount.toFixed(2)}`)
+  const pdfContent = new TextEncoder().encode(`Relatório Z\nSessão: ${sessionId}\nTotal calculado: R$ ${closingAmount.toFixed(2)}\nConferido: R$ ${countedAmount.toFixed(2)}\nDiferença: R$ ${difference.toFixed(2)}`)
   const fileName = `reports/${sessionId}.pdf`
   const { error: uploadErr } = await supabase.storage.from('reports').upload(fileName, pdfContent, {
     contentType: 'application/pdf',

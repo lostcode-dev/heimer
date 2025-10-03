@@ -8,6 +8,8 @@ import { formatBRL } from '@/lib/format'
 import { apiProductSuppliers } from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { Eye } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 
 type Product = {
   id: string
@@ -24,6 +26,7 @@ type Product = {
 }
 
 export default function ProductsPage() {
+  const navigate = useNavigate()
   const [pagination, setPagination] = useState<IPagination>({
     sortField: 'created_at', sortOrder: 'DESC', search: '', currentPage: 1, itemsPerPage: 10,
     currentTotalItems: 0, totalItems: 0, totalPages: 1,
@@ -90,12 +93,13 @@ export default function ProductsPage() {
   }
 
   const actions = useMemo(() => ({
+    view: ((row: Record<string, any>) => { const r = row as Product; navigate(`/app/products/${r.sku}`) }) as (row: Record<string, any>) => void,
     update: ((updatedData: Record<string, any>[]) => {
       const row = Array.isArray(updatedData) ? updatedData[0] : (updatedData as unknown as Record<string, any>)
       setEditing(row as Product); setEditKey((k) => k + 1); setOpenForm(true)
     }) as (updatedData: Record<string, any>[]) => void,
     delete: ((row: Record<string, any>) => { (async () => { try { await apiProducts.remove((row as Product).id); toast.success('Produto removido'); fetchData() } catch (e: any) { toast.error(e?.message ?? 'Falha ao remover') } })() }) as (row: Record<string, any>) => void,
-  }), [])
+  }), [navigate])
 
   const CategoriesCell: React.FC<{ row: Product }> = ({ row }) => {
     const list = Array.isArray(row.categories) ? row.categories.filter(Boolean) : []
@@ -173,7 +177,9 @@ export default function ProductsPage() {
         pagination={pagination}
         selected={selected}
         loading={loading}
-        actions={actions}
+        actions={actions as any}
+        actionsLabels={{ view: 'Detalhes' }}
+        actionsIcons={{ view: <Eye className="size-4" /> }}
         onRowSelectionChange={(rows: unknown[]) => setSelected(rows as Product[])}
         onRequest={onRequest}
         onAddItem={onAddItem}

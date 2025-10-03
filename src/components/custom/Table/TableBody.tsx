@@ -67,7 +67,12 @@ const handleRowSelection = (
   onRowSelectionChange?.(updatedSelected);
 };
 
-const renderActionCell = (row: Record<string, any>, actions: any) => {
+const renderActionCell = (
+  row: Record<string, any>,
+  actions: any,
+  labels?: { view?: string; update?: string; delete?: string },
+  icons?: { view?: React.ReactNode; update?: React.ReactNode; delete?: React.ReactNode }
+) => {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -81,13 +86,22 @@ const renderActionCell = (row: Record<string, any>, actions: any) => {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-32">
+        {actions.view && (
+          <DropdownMenuItem
+            onClick={() => actions.view(row)}
+            className="cursor-pointer flex items-center gap-2"
+          >
+            {icons?.view ?? <IconEdit size={16} />}
+            {labels?.view ?? 'Detalhes'}
+          </DropdownMenuItem>
+        )}
         {actions.update && (
           <DropdownMenuItem
             onClick={() => actions.update(row)}
             className="cursor-pointer flex items-center gap-2"
           >
-            <IconEdit size={16} />
-            Editar
+            {icons?.update ?? <IconEdit size={16} />}
+            {labels?.update ?? 'Editar'}
           </DropdownMenuItem>
         )}
         {actions.delete && (
@@ -96,8 +110,8 @@ const renderActionCell = (row: Record<string, any>, actions: any) => {
             onClick={() => actions.delete(row)}
             className="cursor-pointer flex items-center gap-2"
           >
-            <IconTrash size={16} />
-            Excluir
+            {icons?.delete ?? <IconTrash size={16} />}
+            {labels?.delete ?? 'Excluir'}
           </DropdownMenuItem>
         )}
       </DropdownMenuContent>
@@ -111,6 +125,8 @@ export default function CustomTableBody({
   selected,
   loading = false,
   actions,
+  actionsLabels,
+  actionsIcons,
   onRowSelectionChange,
 }: {
   data: Record<string, any>[];
@@ -121,6 +137,8 @@ export default function CustomTableBody({
     update: (updatedData: Record<string, any>[]) => void;
     delete: (row: Record<string, any>) => void;
   };
+  actionsLabels?: { update?: string; delete?: string };
+  actionsIcons?: { update?: React.ReactNode; delete?: React.ReactNode };
   onRowSelectionChange?: (selectedRows: unknown[]) => void;
 }) {
 
@@ -165,7 +183,7 @@ export default function CustomTableBody({
                 </TableCell>
               ))}
               {actions && (
-                <TableCell>{renderActionCell(row, actions)}</TableCell>
+                <TableCell>{renderActionCell(row, actions, actionsLabels, actionsIcons)}</TableCell>
               )}
             </TableRow>
           ))}

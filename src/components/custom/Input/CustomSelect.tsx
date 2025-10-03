@@ -66,8 +66,8 @@ const CustomSelect: React.FC<CustomSelectProps> = ({
                 name={name}
                 onOpenChange={onOpenChange}
             >
-                <SelectTrigger id={name} className={"w-full"}>
-                    <SelectValue placeholder={placeholder} />
+                <SelectTrigger id={name} className={"w-full truncate"}>
+                    <SelectValue placeholder={placeholder} className="truncate" />
                 </SelectTrigger>
                 <SelectContent>
                     {searchable && (

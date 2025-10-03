@@ -1,6 +1,6 @@
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 
-import { LayoutDashboard, ClipboardList, Boxes, Settings, ListChecks } from "lucide-react";
+import { LayoutDashboard, ClipboardList, Boxes, Settings, ListChecks, CircleDollarSign } from "lucide-react";
 import { Outlet, useLocation } from "react-router-dom";
 import { AppSidebar } from "../common/AppSidebar";
 import { SiteHeader } from "../common/SiteHeader";
@@ -125,6 +125,14 @@ export default function AppLayout() {
           { title: 'Caixa', url: AppRoutes.Cash },
           { title: 'Estoque', url: AppRoutes.Inventory },
           { title: 'Vendas', url: '/app/sales' },
+        ],
+      },
+      {
+        title: 'Financeiro',
+        icon: CircleDollarSign,
+        items: [
+          { title: 'Contas a Receber', url: '/app/finance/receivables' },
+          { title: 'Contas a Pagar', url: '/app/finance/payables' },
         ],
       },
       {

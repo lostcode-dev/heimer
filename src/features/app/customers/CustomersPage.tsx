@@ -6,6 +6,7 @@ import { CustomTable } from '@/components/custom/Table/CustomTable'
 import type { IColumns, IPagination } from '@/types'
 import { CheckCircle2, XCircle } from 'lucide-react'
 import NameWithAvatar from '@/components/common/NameWithAvatar'
+import { Link } from 'react-router-dom'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 type Customer = {
@@ -141,7 +142,9 @@ export default function CustomersPage() {
   )
 
   const NameCell: React.FC<{ row: Customer }> = ({ row }) => (
-    <NameWithAvatar name={row.full_name} phone={row.phone} />
+    <Link to={`/app/customers/${row.id}`} className="hover:underline">
+      <NameWithAvatar name={row.full_name} phone={row.phone} />
+    </Link>
   )
 
   const AddressCell: React.FC<{ row: Customer }> = ({ row }) => {

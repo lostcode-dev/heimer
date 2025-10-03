@@ -107,6 +107,11 @@ export const apiCustomers = {
     if (error) throw error
     return data?.length ?? 0
   },
+  async getById(id: string) {
+    const { data, error } = await supabase.from('customers').select('*').eq('id', id).single()
+    if (error) throw error
+    return data
+  },
 }
 
 // PRODUCTS
@@ -409,6 +414,19 @@ export const apiOrders = {
     const { data, error } = await supabase.rpc('preview_next_ticket_number')
     if (error) throw error
     return (data as unknown as string) || ''
+  },
+  async listByCustomer(customerId: string, params: { page: number; pageSize: number; sortBy?: string; sortDir?: 'asc' | 'desc' }) {
+    const { page, pageSize, sortBy = 'created_at', sortDir = 'desc' } = params
+    const from = page * pageSize
+    const to = from + pageSize - 1
+    const { data, error, count } = await supabase
+      .from('service_orders')
+      .select('id, ticket_number, status, total_amount, created_at')
+      .eq('customer_id', customerId)
+      .order(sortBy, { ascending: sortDir === 'asc' })
+      .range(from, to)
+    if (error) throw error
+    return { data: data ?? [], count: count ?? 0 }
   },
   async create(input: NewOrderInput) {
     // 1) create base order
@@ -1145,6 +1163,151 @@ export const apiBilling = {
   },
 }
 
+// FINANCE: RECEIVABLES & PAYABLES
+export const apiReceivables = {
+  async listPaginated(params: { page: number; pageSize: number; query?: string; sortBy?: string; sortDir?: 'asc' | 'desc'; status?: string; startDate?: string; endDate?: string }) {
+    const { page, pageSize, query, sortBy = 'due_date', sortDir = 'asc', status, startDate, endDate } = params
+    const from = page * pageSize
+    const to = from + pageSize - 1
+    let q = supabase
+      .from('receivables')
+      .select('*, customer:customer_id(full_name), payments:receivable_payments(amount)', { count: 'exact' })
+      .order(sortBy, { ascending: sortDir === 'asc' })
+      .range(from, to)
+
+  if (status && status !== 'ALL') q = q.eq('status', status)
+  if (startDate) q = q.gte('due_date', new Date(startDate).toISOString())
+  if (endDate) q = q.lte('due_date', new Date(endDate).toISOString())
+    if (query && query.trim()) q = q.or(`description.ilike.%${query}%,notes.ilike.%${query}%`)
+
+    const { data, error, count } = await q
+    if (error) throw error
+    const rows = (data ?? []).map((r: any) => {
+      const received = Array.isArray(r.payments) ? r.payments.reduce((acc: number, p: any) => acc + Number(p.amount || 0), 0) : Number(r.received_total || 0)
+      const remaining = Math.max(0, Number(r.amount || 0) - received)
+      return { ...r, customer_name: r.customer?.full_name ?? '-', received_total: received, remaining }
+    })
+    return { data: rows, count: count ?? 0 }
+  },
+  async listByCustomerOpen(customerId: string) {
+    const { data, error } = await supabase
+      .from('receivables')
+      .select('id, description, due_date, amount, received_total, status')
+      .eq('customer_id', customerId)
+      .in('status', ['OPEN','PARTIAL'])
+      .order('due_date', { ascending: true })
+    if (error) throw error
+    return (data ?? []).map((r: any) => ({ ...r, remaining: Math.max(0, Number(r.amount || 0) - Number(r.received_total || 0)) }))
+  },
+  async create(input: { customer_id?: string | null; description: string; issue_date?: string | null; due_date: string; amount: number; notes?: string | null }) {
+    const cid = await getCompanyIdOrThrow()
+    const payload: any = {
+      company_id: cid,
+      customer_id: input.customer_id ?? null,
+      description: input.description,
+      issue_date: input.issue_date ? input.issue_date.slice(0, 10) : null,
+      due_date: input.due_date.slice(0, 10),
+      amount: Number(input.amount),
+      notes: input.notes ?? null,
+    }
+    const { data, error } = await supabase.from('receivables').insert(payload).select('*').single()
+    if (error) throw error
+    return data
+  },
+  async addReceipt(input: { receivable_id: string; amount: number; method: 'CASH' | 'CARD' | 'PIX' | 'TRANSFER'; notes?: string | null; cash_session_id?: string | null }) {
+    const cid = await getCompanyIdOrThrow()
+    const amt = Math.abs(Number(input.amount))
+    const { data: rec, error: recErr } = await supabase.from('receivables').select('id, amount, received_total').eq('id', input.receivable_id).single()
+    if (recErr) throw recErr
+    const received_total = Number((rec as any)?.received_total || 0) + amt
+    const total = Number((rec as any)?.amount || 0)
+    const status = received_total >= total ? 'PAID' : 'PARTIAL'
+    const { error: payErr } = await supabase.from('receivable_payments').insert({
+      company_id: cid,
+      receivable_id: input.receivable_id,
+      amount: amt,
+      method: input.method,
+      notes: input.notes ?? null,
+      cash_session_id: input.cash_session_id ?? null,
+    })
+    if (payErr) throw payErr
+    const { error: updErr } = await supabase.from('receivables').update({ received_total, status }).eq('id', input.receivable_id)
+    if (updErr) throw updErr
+    if (input.cash_session_id) {
+      // create cash movement deposit
+      await apiCash.addIncome({ cash_session_id: input.cash_session_id, amount: amt, method: input.method, notes: 'Recebimento' })
+    }
+    return true
+  },
+}
+
+export const apiPayables = {
+  async listPaginated(params: { page: number; pageSize: number; query?: string; sortBy?: string; sortDir?: 'asc' | 'desc'; status?: string; startDate?: string; endDate?: string }) {
+    const { page, pageSize, query, sortBy = 'due_date', sortDir = 'asc', status, startDate, endDate } = params
+    const from = page * pageSize
+    const to = from + pageSize - 1
+    let q = supabase
+      .from('payables')
+      .select('*, supplier:supplier_id(name), payments:payable_payments(amount)', { count: 'exact' })
+      .order(sortBy, { ascending: sortDir === 'asc' })
+      .range(from, to)
+
+  if (status && status !== 'ALL') q = q.eq('status', status)
+  if (startDate) q = q.gte('due_date', new Date(startDate).toISOString())
+  if (endDate) q = q.lte('due_date', new Date(endDate).toISOString())
+    if (query && query.trim()) q = q.or(`description.ilike.%${query}%,notes.ilike.%${query}%`)
+
+    const { data, error, count } = await q
+    if (error) throw error
+    const rows = (data ?? []).map((r: any) => {
+      const paid = Array.isArray(r.payments) ? r.payments.reduce((acc: number, p: any) => acc + Number(p.amount || 0), 0) : Number(r.paid_total || 0)
+      const remaining = Math.max(0, Number(r.amount || 0) - paid)
+      return { ...r, supplier_name: r.supplier?.name ?? '-', paid_total: paid, remaining }
+    })
+    return { data: rows, count: count ?? 0 }
+  },
+  async create(input: { supplier_id?: string | null; description: string; issue_date?: string | null; due_date: string; amount: number; notes?: string | null }) {
+    const cid = await getCompanyIdOrThrow()
+    const payload: any = {
+      company_id: cid,
+      supplier_id: input.supplier_id ?? null,
+      description: input.description,
+      issue_date: input.issue_date ? input.issue_date.slice(0, 10) : null,
+      due_date: input.due_date.slice(0, 10),
+      amount: Number(input.amount),
+      notes: input.notes ?? null,
+    }
+    const { data, error } = await supabase.from('payables').insert(payload).select('*').single()
+    if (error) throw error
+    return data
+  },
+  async addPayment(input: { payable_id: string; amount: number; method: 'CASH' | 'CARD' | 'PIX' | 'TRANSFER'; notes?: string | null; cash_session_id?: string | null }) {
+    const cid = await getCompanyIdOrThrow()
+    const amt = Math.abs(Number(input.amount))
+    const { data: pay, error: recErr } = await supabase.from('payables').select('id, amount, paid_total').eq('id', input.payable_id).single()
+    if (recErr) throw recErr
+    const paid_total = Number((pay as any)?.paid_total || 0) + amt
+    const total = Number((pay as any)?.amount || 0)
+    const status = paid_total >= total ? 'PAID' : 'PARTIAL'
+    const { error: payErr } = await supabase.from('payable_payments').insert({
+      company_id: cid,
+      payable_id: input.payable_id,
+      amount: amt,
+      method: input.method,
+      notes: input.notes ?? null,
+      cash_session_id: input.cash_session_id ?? null,
+    })
+    if (payErr) throw payErr
+    const { error: updErr } = await supabase.from('payables').update({ paid_total, status }).eq('id', input.payable_id)
+    if (updErr) throw updErr
+    if (input.cash_session_id) {
+      // create cash movement withdrawal categorized as supplier payment
+      await apiCash.addExpense({ cash_session_id: input.cash_session_id, amount: amt, category: 'FORNECEDOR', method: input.method, notes: input.notes ?? 'Pagamento fornecedor' })
+    }
+    return true
+  },
+}
+
 export const apiAdminUsers = {
   async listPaginated(params: { page: number; pageSize: number; query?: string; sortBy?: string; sortDir?: 'asc' | 'desc' }) {
     const { page, pageSize, query, sortBy: _sortBy = 'created_at', sortDir: _sortDir = 'desc' } = params
@@ -1265,6 +1428,52 @@ export const apiDashboard = {
 
 // SALES TIMESERIES (payments grouped by day)
 export const apiSales = {
+  async createDirectSale(input: { product_id: string; qty: number; unit_price: number; method: 'CASH' | 'CARD' | 'PIX' | 'TRANSFER'; customer_id?: string | null; cash_session_id?: string | null; notes?: string | null }) {
+    const cid = await getCompanyIdOrThrow()
+    const total = Number(input.qty) * Number(input.unit_price)
+    const { data, error } = await supabase
+      .from('direct_sales')
+      .insert({
+        company_id: cid,
+        product_id: input.product_id,
+        customer_id: input.customer_id ?? null,
+        qty: input.qty,
+        unit_price: input.unit_price,
+        total,
+        method: input.method,
+        cash_session_id: input.cash_session_id ?? null,
+        notes: input.notes ?? null,
+      })
+      .select('*')
+      .single()
+    if (error) throw error
+    return data
+  },
+  async listDirectSales(params: { page: number; pageSize: number; query?: string; sortBy?: string; sortDir?: 'asc' | 'desc' }) {
+    const { page, pageSize, sortBy = 'occurred_at', sortDir = 'desc' } = params
+    const from = page * pageSize
+    const to = from + pageSize - 1
+    const { data, error, count } = await supabase
+      .from('direct_sales')
+      .select('*, product:product_id(sku,name) , customer:customer_id(full_name) ', { count: 'exact' })
+      .order(sortBy, { ascending: sortDir === 'asc' })
+      .range(from, to)
+    if (error) throw error
+    return { data: data ?? [], count: count ?? 0 }
+  },
+  async listDirectSalesByCustomer(customerId: string, params: { page: number; pageSize: number; sortBy?: string; sortDir?: 'asc' | 'desc' }) {
+    const { page, pageSize, sortBy = 'occurred_at', sortDir = 'desc' } = params
+    const from = page * pageSize
+    const to = from + pageSize - 1
+    const { data, error, count } = await supabase
+      .from('direct_sales')
+      .select('*, product:product_id(sku,name)')
+      .eq('customer_id', customerId)
+      .order(sortBy, { ascending: sortDir === 'asc' })
+      .range(from, to)
+    if (error) throw error
+    return { data: data ?? [], count: count ?? 0 }
+  },
   async getSalesTimeseries(range: '7d' | '30d' | '90d') {
     const days = range === '7d' ? 7 : range === '30d' ? 30 : 90
 
@@ -1494,6 +1703,52 @@ export const apiReminders = {
       const diffMs = due.getTime() - today.getTime()
       const days_left = Math.round(diffMs / (24 * 60 * 60 * 1000))
       return { id: r.id as string, ticket_number: r.ticket_number as string, due_date: r.due_date as string, days_left, customer_name: r.customer?.full_name ?? '-' }
+    })
+  },
+  async getReceivablesDueSoon(daysAhead = 7) {
+    const now = new Date()
+    const startIso = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
+    const end = new Date(now)
+    end.setDate(end.getDate() + daysAhead)
+    const endIso = end.toISOString()
+
+    const { data, error } = await supabase
+      .from('receivables')
+      .select('id, customer:customer_id(full_name), due_date, amount, received_total, description, status')
+      .in('status', ['OPEN','PARTIAL'])
+      .gte('due_date', startIso)
+      .lte('due_date', endIso)
+      .order('due_date', { ascending: true })
+    if (error) throw error
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    return (data ?? []).map((r: any) => {
+      const due = new Date(r.due_date)
+      const days_left = Math.round((due.getTime() - today.getTime()) / (24*60*60*1000))
+      const remaining = Math.max(0, Number(r.amount || 0) - Number(r.received_total || 0))
+      return { id: r.id as string, customer_name: r.customer?.full_name ?? '-', due_date: r.due_date as string, days_left, remaining, description: r.description as string }
+    })
+  },
+  async getPayablesDueSoon(daysAhead = 7) {
+    const now = new Date()
+    const startIso = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
+    const end = new Date(now)
+    end.setDate(end.getDate() + daysAhead)
+    const endIso = end.toISOString()
+
+    const { data, error } = await supabase
+      .from('payables')
+      .select('id, supplier:supplier_id(name), due_date, amount, paid_total, description, status')
+      .in('status', ['OPEN','PARTIAL'])
+      .gte('due_date', startIso)
+      .lte('due_date', endIso)
+      .order('due_date', { ascending: true })
+    if (error) throw error
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    return (data ?? []).map((r: any) => {
+      const due = new Date(r.due_date)
+      const days_left = Math.round((due.getTime() - today.getTime()) / (24*60*60*1000))
+      const remaining = Math.max(0, Number(r.amount || 0) - Number(r.paid_total || 0))
+      return { id: r.id as string, supplier_name: r.supplier?.name ?? '-', due_date: r.due_date as string, days_left, remaining, description: r.description as string }
     })
   },
 }

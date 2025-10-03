@@ -3,7 +3,7 @@ import { apiReminders } from '@/lib/api'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
-import { AlertTriangle, CalendarDays, PackageOpen } from 'lucide-react'
+import { AlertTriangle, CalendarDays, PackageOpen, Banknote, CreditCard } from 'lucide-react'
 
 type LowStock = { id: string; sku: string; name: string; stock_qty: number; reorder_level: number }
 type Birthday = { id: string; full_name: string; birth_date: string; type: 'customer' | 'employee' | 'technician' }
@@ -14,20 +14,26 @@ export default function RemindersPage() {
     const [lowStock, setLowStock] = useState<LowStock[]>([])
     const [birthdays, setBirthdays] = useState<Birthday[]>([])
     const [dueSoon, setDueSoon] = useState<DueSoon[]>([])
+    const [recvSoon, setRecvSoon] = useState<any[]>([])
+    const [paySoon, setPaySoon] = useState<any[]>([])
 
     useEffect(() => {
         let mounted = true
             ; (async () => {
                 try {
-                    const [ls, b, ds] = await Promise.all([
+                    const [ls, b, ds, ars, aps] = await Promise.all([
                         apiReminders.getLowStock(),
                         apiReminders.getUpcomingBirthdays(14),
                         apiReminders.getOrdersDueSoon(3),
+                        apiReminders.getReceivablesDueSoon(7),
+                        apiReminders.getPayablesDueSoon(7),
                     ])
                     if (!mounted) return
                     setLowStock(ls)
                     setBirthdays(b)
                     setDueSoon(ds)
+                    setRecvSoon(ars)
+                    setPaySoon(aps)
                 } catch (_e) {
                     // noop: could show a toast
                 } finally {
@@ -38,7 +44,7 @@ export default function RemindersPage() {
     }, [])
 
     return (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <Card>
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2"><PackageOpen className="size-4 text-amber-600" /> Estoque baixo</CardTitle>
@@ -165,6 +171,76 @@ export default function RemindersPage() {
                                         </div>
                                         <Badge className="shrink-0">{label}</Badge>
                                     </li>
+                                )
+                            })}
+                        </ul>
+                    )}
+                </CardContent>
+            </Card>
+
+            <Card>
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2"><Banknote className="size-4 text-emerald-600" /> A Receber (7 dias)</CardTitle>
+                    <CardDescription>Vencem em até 7 dias</CardDescription>
+                </CardHeader>
+                <CardContent>
+                    {loading ? (
+                        <ul className="space-y-2">{Array.from({ length: 4 }).map((_, i) => (<li key={i} className="flex items-center justify-between rounded-md border p-2"><div className="space-y-1"><Skeleton className="h-4 w-40" /><Skeleton className="h-3 w-24" /></div><div className="text-right space-y-1"><Skeleton className="h-5 w-28 rounded-md" /><Skeleton className="h-3 w-20" /></div></li>))}</ul>
+                    ) : recvSoon.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">Sem recebimentos próximos.</p>
+                    ) : (
+                        <ul className="space-y-2">
+                            {recvSoon.map((r: any) => {
+                                const d = new Date(r.due_date)
+                                const label = d.toLocaleDateString('pt-BR', { dateStyle: 'medium' })
+                                return (
+                                    <a href="/app/finance/receivables" className="flex items-center justify-between rounded-md border p-2 hover:bg-accent" key={r.id}>
+                                        <div>
+                                            <div className="font-medium">{r.customer_name}</div>
+                                            <div className="text-xs text-muted-foreground">{r.description}</div>
+                                        </div>
+                                        <div className="text-right">
+                                            <Badge variant={r.days_left < 0 ? 'destructive' : 'default'}>
+                                                {r.days_left < 0 ? `${Math.abs(r.days_left)} dia(s) em atraso` : `Faltam ${r.days_left} dia(s)`}
+                                            </Badge>
+                                            <div className="text-xs text-muted-foreground">Venc: {label} · Restante R$ {(Number(r.remaining)||0).toFixed(2)}</div>
+                                        </div>
+                                    </a>
+                                )
+                            })}
+                        </ul>
+                    )}
+                </CardContent>
+            </Card>
+
+            <Card>
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2"><CreditCard className="size-4 text-sky-600" /> A Pagar (7 dias)</CardTitle>
+                    <CardDescription>Vencem em até 7 dias</CardDescription>
+                </CardHeader>
+                <CardContent>
+                    {loading ? (
+                        <ul className="space-y-2">{Array.from({ length: 4 }).map((_, i) => (<li key={i} className="flex items-center justify-between rounded-md border p-2"><div className="space-y-1"><Skeleton className="h-4 w-40" /><Skeleton className="h-3 w-24" /></div><div className="text-right space-y-1"><Skeleton className="h-5 w-28 rounded-md" /><Skeleton className="h-3 w-20" /></div></li>))}</ul>
+                    ) : paySoon.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">Sem pagamentos próximos.</p>
+                    ) : (
+                        <ul className="space-y-2">
+                            {paySoon.map((p: any) => {
+                                const d = new Date(p.due_date)
+                                const label = d.toLocaleDateString('pt-BR', { dateStyle: 'medium' })
+                                return (
+                                    <a href="/app/finance/payables" className="flex items-center justify-between rounded-md border p-2 hover:bg-accent" key={p.id}>
+                                        <div>
+                                            <div className="font-medium">{p.supplier_name}</div>
+                                            <div className="text-xs text-muted-foreground">{p.description}</div>
+                                        </div>
+                                        <div className="text-right">
+                                            <Badge variant={p.days_left < 0 ? 'destructive' : 'default'}>
+                                                {p.days_left < 0 ? `${Math.abs(p.days_left)} dia(s) em atraso` : `Faltam ${p.days_left} dia(s)`}
+                                            </Badge>
+                                            <div className="text-xs text-muted-foreground">Venc: {label} · Restante R$ {(Number(p.remaining)||0).toFixed(2)}</div>
+                                        </div>
+                                    </a>
                                 )
                             })}
                         </ul>

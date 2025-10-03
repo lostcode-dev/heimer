@@ -9,6 +9,7 @@ import ResetPasswordPage from '../features/auth/ResetPasswordPage'
 import AuthCallback from '../features/auth/AuthCallback'
 
 import CustomersPage from '../features/app/customers/CustomersPage'
+import CustomerDetailsPage from '../features/app/customers/CustomerDetailsPage'
 import ProductsPage from '../features/app/products/ProductsPage'
 import ServicesPage from '../features/app/services/ServicesPage'
 import TechniciansPage from '../features/app/technicians/TechniciansPage'
@@ -25,6 +26,8 @@ import ReportsPage from '../features/app/reports/ReportsPage'
 import EmployeesPage from '../features/app/employees/EmployeesPage'
 import RemindersPage from '../features/app/reminders/RemindersPage'
 import SalesPage from '../features/app/sales/SalesPage'
+import ReceivablesPage from '../features/app/finance/ReceivablesPage'
+import PayablesPage from '../features/app/finance/PayablesPage'
 
 import CashPage from '../features/app/cash/CashPage'
 import AppLayout from '../components/layout/AppLayout'
@@ -50,6 +53,7 @@ const router = createBrowserRouter([
                 children: [
                     { path: 'dashboard', element: <DashboardPage /> },
                     { path: 'customers', element: <CustomersPage /> },
+                    { path: 'customers/:id', element: <CustomerDetailsPage /> },
                     { path: 'products', element: <ProductsPage /> },
                     { path: 'products/:sku', element: <ProductDetailsPage /> },
                     { path: 'services', element: <ServicesPage /> },
@@ -62,6 +66,8 @@ const router = createBrowserRouter([
                     { path: 'orders/:id', element: <OrderDetailsPage /> },
                     { path: 'cash', element: <CashPage /> },
                     { path: 'reminders', element: <RemindersPage /> },
+                    { path: 'finance/receivables', element: <ReceivablesPage /> },
+                    { path: 'finance/payables', element: <PayablesPage /> },
                     { path: 'sales', element: <SalesPage /> },
                     { path: 'reports/overview', element: <ReportsPage /> },
                     { path: 'settings/company', element: <CompanySettingsPage /> },

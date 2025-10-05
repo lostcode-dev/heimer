@@ -133,6 +133,9 @@ export default function AppLayout() {
         items: [
           { title: 'Contas a Receber', url: '/app/finance/receivables' },
           { title: 'Contas a Pagar', url: '/app/finance/payables' },
+          {
+            title: 'Fiados', url: '/app/finance/fiados'
+          },
         ],
       },
       {
@@ -151,7 +154,6 @@ export default function AppLayout() {
         title: 'Relatórios',
         icon: ClipboardList,
         items: [
-          { title: 'Visão Geral', url: '/app/reports/overview' },
           { title: 'Vendas', url: '/app/reports/overview' },
           { title: 'Serviços', url: '/app/reports/overview' },
           { title: 'Caixa', url: '/app/reports/overview' },

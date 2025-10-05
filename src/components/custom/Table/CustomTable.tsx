@@ -82,7 +82,7 @@ export function CustomTable({
             disabled={loading}
             icon={<Search size={16} />}
           />
-          <div className="flex gap-2">
+          <div className="flex gap-2 text-nowrap">
             {extraActions}
 
             {onRemoveItens && (

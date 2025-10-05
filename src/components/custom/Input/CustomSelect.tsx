@@ -18,7 +18,7 @@ interface CustomSelectProps {
     required?: boolean;
     error?: string;
     disabled?: boolean;
-    options: { value: string; label: string }[];
+    options: { value: string; label: string; disabled?: boolean }[];
     onChange: (value: string) => void;
     additionalElement?: React.ReactNode;
     // New optional features
@@ -93,7 +93,7 @@ const CustomSelect: React.FC<CustomSelectProps> = ({
                     {!loading && options
                         .filter((option) => option.value !== '')
                         .map((option) => (
-                            <SelectItem key={option.value} value={option.value}>
+                            <SelectItem key={option.value} value={option.value} disabled={!!option.disabled}>
                                 {option.label}
                             </SelectItem>
                         ))}

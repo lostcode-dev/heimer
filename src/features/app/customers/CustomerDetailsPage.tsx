@@ -52,8 +52,8 @@ export default function CustomerDetailsPage() {
   const [receiveOpen, setReceiveOpen] = useState(false)
   const [selectedRow, setSelectedRow] = useState<any | null>(null)
   function openReceive(r: any) { setSelectedRow(r); setReceiveOpen(true) }
-  async function submitReceive(data: { amount: number; method: 'CASH' | 'CARD' | 'PIX' | 'TRANSFER'; notes?: string | null }) {
-    const session = await (async () => { try { return await apiCash.getOpenSession() } catch { return null } })()
+  async function submitReceive(data: { amount: number; method: 'CASH' | 'CARD' | 'PIX' | 'TRANSFER'; notes?: string | null; addToCash?: boolean }) {
+    const session = data.addToCash ? await (async () => { try { return await apiCash.getOpenSession() } catch { return null } })() : null
     await apiReceivables.addReceipt({ receivable_id: selectedRow!.id, amount: data.amount, method: data.method, cash_session_id: session?.id ?? null, notes: data.notes ?? null })
     toast.success('Recebimento registrado')
     const updated = await apiReceivables.listByCustomerOpen(id!)

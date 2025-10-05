@@ -24,9 +24,9 @@ export default function ReceivablesPage() {
     { label: 'Vencimento', field: 'due_date', sortable: true, format: (v) => new Date(v).toLocaleDateString('pt-BR') },
     { label: 'Cliente', field: 'customer_name', sortable: false },
     { label: 'Descrição', field: 'description', sortable: true },
-    { label: 'Valor', field: 'amount', sortable: true, format: (v) => formatBRL(Number(v)||0) },
-    { label: 'Recebido', field: 'received_total', sortable: true, format: (v) => formatBRL(Number(v)||0) },
-    { label: 'Restante', field: 'remaining', sortable: true, format: (v) => formatBRL(Number(v)||0) },
+    { label: 'Valor', field: 'amount', sortable: true, format: (v) => formatBRL(Number(v) || 0) },
+    { label: 'Recebido', field: 'received_total', sortable: true, format: (v) => formatBRL(Number(v) || 0) },
+    { label: 'Restante', field: 'remaining', sortable: true, format: (v) => formatBRL(Number(v) || 0) },
     { label: 'Status', field: 'status', sortable: true },
   ]
 
@@ -34,7 +34,7 @@ export default function ReceivablesPage() {
 
   async function fetchRows() {
     try {
-  const { data, count } = await apiReceivables.listPaginated({ page: pagination.currentPage - 1, pageSize: pagination.itemsPerPage, sortBy: pagination.sortField, sortDir: pagination.sortOrder === 'ASC' ? 'asc' : 'desc', startDate: filters.startDate, endDate: filters.endDate, status: filters.status })
+      const { data, count } = await apiReceivables.listPaginated({ page: pagination.currentPage - 1, pageSize: pagination.itemsPerPage, sortBy: pagination.sortField, sortDir: pagination.sortOrder === 'ASC' ? 'asc' : 'desc', startDate: filters.startDate, endDate: filters.endDate, status: filters.status })
       setRows(data ?? [])
       setPagination((p) => ({ ...p, currentTotalItems: data?.length ?? 0, totalItems: count ?? 0, totalPages: Math.max(1, Math.ceil((count ?? 0) / p.itemsPerPage)) }))
     } catch (e: any) { toast.error(e?.message ?? 'Falha ao carregar recebíveis') }
@@ -58,23 +58,18 @@ export default function ReceivablesPage() {
   }
 
   function openReceive(row: any) { setSelectedRow(row); setReceiveOpen(true) }
-  async function submitReceive(data: { amount: number; method: 'CASH' | 'CARD' | 'PIX' | 'TRANSFER'; notes?: string | null }) {
-    const session = await (async () => { try { return await apiCash.getOpenSession() } catch { return null } })()
+  async function submitReceive(data: { amount: number; method: 'CASH' | 'CARD' | 'PIX' | 'TRANSFER'; notes?: string | null; addToCash?: boolean }) {
+    const session = data.addToCash ? await (async () => { try { return await apiCash.getOpenSession() } catch { return null } })() : null
     await apiReceivables.addReceipt({ receivable_id: selectedRow!.id, amount: data.amount, method: data.method, cash_session_id: session?.id ?? null, notes: data.notes ?? null })
     toast.success('Recebimento registrado')
     setSelectedRow(null)
     void fetchRows()
   }
 
-  const actions = useMemo(() => ({ custom: [ { key: 'receive', label: 'Receber', onClick: openReceive } ] }), [])
+  const actions = useMemo(() => ({ custom: [{ key: 'receive', label: 'Receber', onClick: openReceive }] }), [])
 
   return (
     <section className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Contas a Receber</h2>
-        <button className="btn btn-primary" onClick={() => setOpen(true)}>Novo</button>
-      </div>
-
       <CustomForm open={open} onOpenChange={setOpen} title="Novo recebível" onSubmit={submit} submitLabel={loading ? 'Salvando...' : 'Salvar'} submitDisabled={loading}>
         <>
           <CustomSelect name="customer" label="Cliente" value={form.customer_id ?? ''} onChange={(v) => change('customer_id', v)} options={options} searchable onSearch={async (q) => {
@@ -95,9 +90,9 @@ export default function ReceivablesPage() {
         </div>
       </CustomForm>
 
-  <CustomTable data={rows} columns={columns} pagination={pagination} selected={[]} loading={loading} onRequest={setPagination as any} actions={actions as any} />
+      <CustomTable data={rows} columns={columns} pagination={pagination} selected={[]} loading={loading} onRequest={setPagination as any} actions={actions as any} />
 
-  <ReceivePayModal open={receiveOpen} onOpenChange={setReceiveOpen} title="Receber" defaultAmount={selectedRow?.remaining ?? 0} onSubmit={async (d) => { try { await submitReceive(d) } catch (e: any) { toast.error(e?.message ?? 'Falha ao receber') } }} />
+      <ReceivePayModal open={receiveOpen} onOpenChange={setReceiveOpen} title="Receber" defaultAmount={selectedRow?.remaining ?? 0} onSubmit={async (d) => { try { await submitReceive(d) } catch (e: any) { toast.error(e?.message ?? 'Falha ao receber') } }} />
     </section>
   )
 }

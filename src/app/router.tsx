@@ -26,8 +26,12 @@ import ReportsPage from '../features/app/reports/ReportsPage'
 import EmployeesPage from '../features/app/employees/EmployeesPage'
 import RemindersPage from '../features/app/reminders/RemindersPage'
 import SalesPage from '../features/app/sales/SalesPage'
+import SaleDetailsPage from '../features/app/sales/SaleDetailsPage'
 import ReceivablesPage from '../features/app/finance/ReceivablesPage'
+import FiadosPage from '../features/app/finance/FiadosPage'
+import FiadoDetailsPage from '../features/app/finance/FiadoDetailsPage'
 import PayablesPage from '../features/app/finance/PayablesPage'
+import LandingPage from '../features/marketing/LandingPage'
 
 import CashPage from '../features/app/cash/CashPage'
 import AppLayout from '../components/layout/AppLayout'
@@ -35,9 +39,18 @@ import AdminLayout from '../components/layout/AdminLayout'
 import AdminDashboardPage from '../features/admin/Dashboard/AdminDashboardPage'
 import AdminCompanyPage from '../features/admin/Company/AdminCompanyPage'
 import AdminUsersPage from '../features/admin/Users/AdminUsersPage'
+import { LandingLayout } from '@/components/layout/LandingLayout'
 
 
 const router = createBrowserRouter([
+    {
+        path: '/',
+        element: <LandingLayout />,
+        children: [
+            { path: '/', element: <LandingPage /> },
+
+        ]
+    },
     { path: '/auth/signin', element: <SignInPage /> },
     { path: '/auth/signup', element: <SignUpPage /> },
     { path: '/auth/forgot-password', element: <ForgotPasswordPage /> },
@@ -64,11 +77,15 @@ const router = createBrowserRouter([
                     { path: 'orders', element: <OrdersPage /> },
                     { path: 'orders/new', element: <OrderNewEditPage /> },
                     { path: 'orders/:id', element: <OrderDetailsPage /> },
+                    { path: 'orders/:id/edit', element: <OrderNewEditPage /> },
                     { path: 'cash', element: <CashPage /> },
                     { path: 'reminders', element: <RemindersPage /> },
                     { path: 'finance/receivables', element: <ReceivablesPage /> },
+                    { path: 'finance/fiados', element: <FiadosPage /> },
+                    { path: 'finance/fiados/:customerId', element: <FiadoDetailsPage /> },
                     { path: 'finance/payables', element: <PayablesPage /> },
                     { path: 'sales', element: <SalesPage /> },
+                    { path: 'sales/:id', element: <SaleDetailsPage /> },
                     { path: 'reports/overview', element: <ReportsPage /> },
                     { path: 'settings/company', element: <CompanySettingsPage /> },
                     { path: 'settings/billing', element: <BillingPage /> },

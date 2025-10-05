@@ -78,7 +78,8 @@ export default function CustomDatePicker({
             captionLayout="dropdown"
             disabled={disabled}
             onSelect={(date) => {
-              onChange(dayjs(date).toISOString())
+              // Return a date-only value (YYYY-MM-DD) to avoid timezone shifts on storage
+              onChange(dayjs(date).format("YYYY-MM-DD"))
             }}
           />
           <div>{children}</div>

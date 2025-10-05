@@ -3,6 +3,10 @@ import { CustomTable } from '@/components/custom/Table/CustomTable'
 import type { IColumns, IPagination } from '@/types'
 import { useNavigate } from 'react-router-dom'
 import { apiOrders } from '@/lib/api'
+import { formatDateTimeBR, formatBRL } from '@/lib/format'
+import NameWithAvatar from '@/components/common/NameWithAvatar'
+import { Badge } from '@/components/ui/badge'
+import { AlertTriangle, CheckCircle2, Circle, PackageCheck, Truck, XCircle, Eye, Pencil, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 type OrderRow = {
@@ -10,9 +14,12 @@ type OrderRow = {
   ticket_number: string
   customer_name: string
   customer_phone?: string | null
+  technician_name?: string
+  technician_phone?: string | null
   status: 'OPEN' | 'IN_PROGRESS' | 'AWAITING_PARTS' | 'READY' | 'DELIVERED' | 'CANCELLED'
   total_amount: number
   created_at: string
+  due_date?: string | null
 }
 
 const statusLabel: Record<OrderRow['status'], string> = {
@@ -69,10 +76,13 @@ export default function OrdersPage() {
   const onRequest = (updated: IPagination) => setPagination(updated)
 
   const actions = useMemo(() => ({
-    update: ((updatedData: Record<string, any>[]) => {
-      const row = Array.isArray(updatedData) ? updatedData[0] : (updatedData as unknown as Record<string, any>)
+    view: ((row: Record<string, any>) => {
       navigate(`/app/orders/${(row as OrderRow).id}`)
-    }) as (updatedData: Record<string, any>[]) => void,
+    }) as (row: Record<string, any>) => void,
+    update: (((rowOrArray: any) => {
+      const row = Array.isArray(rowOrArray) ? (rowOrArray[0] as OrderRow) : (rowOrArray as OrderRow)
+      navigate(`/app/orders/${row.id}/edit`)
+    }) as unknown) as (updatedData: Record<string, any>[]) => void,
     delete: ((row: Record<string, any>) => {
       (async () => {
         try {
@@ -88,10 +98,35 @@ export default function OrdersPage() {
 
   const columns: IColumns<OrderRow>[] = [
     { label: 'Ticket', field: 'ticket_number', sortable: true },
-    { label: 'Cliente', field: 'customer_name', sortable: true, format: (_v, row) => `${row.customer_name}${row.customer_phone ? ` · ${row.customer_phone}` : ''}` },
-    { label: 'Status', field: 'status', sortable: true, format: (v) => statusLabel[v as OrderRow['status']] },
-    { label: 'Total', field: 'total_amount', sortable: true, format: (v) => `R$ ${(Number(v) || 0).toFixed(2)}` },
-    { label: 'Criada em', field: 'created_at', sortable: true, format: (v) => new Date(v).toLocaleString('pt-BR') },
+    { label: 'Cliente', field: 'customer_name', sortable: true, component: ({ row }) => (
+      <NameWithAvatar name={row.customer_name} phone={row.customer_phone ?? undefined} />
+    ) },
+    { label: 'Técnico', field: 'technician_name', sortable: false, component: ({ row }) => (
+      <NameWithAvatar name={row.technician_name ?? '-'} phone={row.technician_phone ?? undefined} />
+    ) },
+    { label: 'Status', field: 'status', sortable: true, component: ({ row }) => {
+      const s = row.status
+      let cls = 'bg-gray-200 text-gray-800'
+      let Icon: any = Circle
+      if (s === 'OPEN') { cls = 'bg-blue-100 text-blue-800'; Icon = Circle }
+      else if (s === 'IN_PROGRESS') { cls = 'bg-amber-100 text-amber-800'; Icon = PackageCheck }
+      else if (s === 'AWAITING_PARTS') { cls = 'bg-purple-100 text-purple-800'; Icon = AlertTriangle }
+      else if (s === 'READY') { cls = 'bg-emerald-100 text-emerald-800'; Icon = CheckCircle2 }
+      else if (s === 'DELIVERED') { cls = 'bg-sky-100 text-sky-800'; Icon = Truck }
+      else if (s === 'CANCELLED') { cls = 'bg-rose-100 text-rose-800'; Icon = XCircle }
+      return (
+        <Badge variant="outline" className={`gap-1.5 border-transparent ${cls}`}>
+          <Icon className="size-3.5" /> {statusLabel[s]}
+        </Badge>
+      )
+    } },
+  { label: 'Previsão', field: 'due_date', sortable: true, format: (v) => {
+      if (!v) return '—'
+      const dt = v.length <= 10 ? new Date(`${v}T00:00:00`) : new Date(v)
+      return formatDateTimeBR(dt)
+    } },
+  { label: 'Total', field: 'total_amount', sortable: true, format: (v) => formatBRL(Number(v) || 0) },
+  { label: 'Criada em', field: 'created_at', sortable: true, format: (v) => formatDateTimeBR(v) },
   ]
 
   return (
@@ -112,6 +147,8 @@ export default function OrdersPage() {
             .then(() => { toast.success('Ordens removidas'); fetchData() })
             .catch((e) => toast.error(e?.message ?? 'Falha ao remover'))
         }}
+        actionsLabels={{ view: 'Detalhes', update: 'Editar', delete: 'Excluir' }}
+        actionsIcons={{ view: <Eye size={16} />, update: <Pencil size={16} />, delete: <Trash2 size={16} /> }}
       />
     </>
   )

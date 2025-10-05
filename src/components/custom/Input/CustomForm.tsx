@@ -10,6 +10,15 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from "@/components/ui/drawer";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 interface CustomFormProps {
   open: boolean;
@@ -22,6 +31,7 @@ interface CustomFormProps {
   onSubmit?: (e: React.FormEvent) => void;
   submitLabel?: string;
   submitDisabled?: boolean;
+  variant?: 'drawer' | 'dialog';
 }
 
 export default function CustomForm({
@@ -34,6 +44,7 @@ export default function CustomForm({
   onSubmit,
   submitLabel,
   submitDisabled,
+  variant = 'drawer',
 }: CustomFormProps) {
   const isMobile = useIsMobile();
 
@@ -43,6 +54,36 @@ export default function CustomForm({
       onSubmit(e);
     }
   };
+
+  if (variant === 'dialog' || (!isMobile && variant !== 'drawer')) {
+    return (
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent>
+          <DialogHeader className="gap-1">
+            <DialogTitle>{title}</DialogTitle>
+            {description && <DialogDescription>{description}</DialogDescription>}
+          </DialogHeader>
+          <div className="flex flex-col gap-4 overflow-y-auto px-1 text-sm">
+            <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
+              {children}
+            </form>
+          </div>
+          <DialogFooter>
+            {footer || (
+              <>
+                <Button type="submit" onClick={handleSubmit} disabled={submitDisabled}>
+                  {submitLabel ?? 'Salvar'}
+                </Button>
+                <DialogClose asChild>
+                  <Button variant="outline">Cancelar</Button>
+                </DialogClose>
+              </>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  }
 
   return (
     <Drawer

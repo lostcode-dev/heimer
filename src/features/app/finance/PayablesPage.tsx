@@ -70,11 +70,6 @@ export default function PayablesPage() {
 
   return (
     <section className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Contas a Pagar</h2>
-        <button className="btn btn-primary" onClick={() => setOpen(true)}>Novo</button>
-      </div>
-
       <CustomForm open={open} onOpenChange={setOpen} title="Novo pagável" onSubmit={submit} submitLabel={loading ? 'Salvando...' : 'Salvar'} submitDisabled={loading}>
         <>
           <CustomSelect name="supplier" label="Fornecedor" value={form.supplier_id ?? ''} onChange={(v) => change('supplier_id', v)} options={options} searchable onSearch={async (q) => {

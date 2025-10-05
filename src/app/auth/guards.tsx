@@ -2,6 +2,7 @@ import { Navigate, Outlet } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from './AuthProvider'
 import { supabase } from '@/lib/supabaseClient'
+import { Loader2 } from 'lucide-react'
 
 export function AuthGuard() {
   const { loading, session, signOut } = useAuth()
@@ -34,7 +35,15 @@ export function AuthGuard() {
   }, [session])
 
   // Avoid flashing loading after initial check; if we already determined hasCompany, render directly
-  if (loading || (session && !checkedOnce.current && (checkingCompany || hasCompany === null))) return <p>Carregando…</p>
+  if (loading || (session && !checkedOnce.current && (checkingCompany || hasCompany === null))) {
+    return (
+      <div className="min-h-screen w-full grid place-items-center">
+        <div className="flex items-center gap-3 text-muted-foreground">
+          <Loader2 className="h-20 w-20 animate-spin" />
+        </div>
+      </div>
+    )
+  }
   if (!session) return <Navigate to="/auth/signin" replace />
   if (hasCompany === false) return <Navigate to="/auth/signin?error=no-company" replace />
   return <Outlet />

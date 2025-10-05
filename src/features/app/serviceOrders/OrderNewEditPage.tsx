@@ -1,7 +1,7 @@
-import { Smartphone, ShoppingBag, Wrench, Search, Plus, Trash2, DollarSign, UserPlus } from 'lucide-react'
+import { Smartphone, ShoppingBag, Plus, Trash2, UserPlus, CheckCircle2, Circle, X, AlertTriangle, CheckCircle } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { apiCustomerSearch, apiCustomers, apiOrders, apiProductSearch, apiServiceSearch, apiTechnicianSearch, apiTechnicians } from '@/lib/api'
+import { apiCustomerSearch, apiCustomers, apiOrders, apiTechnicianSearch, apiTechnicians, apiProducts } from '@/lib/api'
 import { formatBRL, maskTimeHHmm, parseBRL } from '@/lib/format'
 import { toast } from 'sonner'
 import { Card } from '@/components/ui/card'
@@ -10,15 +10,19 @@ import CustomInput from '@/components/custom/Input/CustomInput'
 import CustomSelect from '@/components/custom/Input/CustomSelect'
 import CustomDatePicker from '@/components/custom/Input/CustomDatePicker'
 import { Textarea } from '@/components/ui/textarea'
+import { Badge } from '@/components/ui/badge'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { CustomerForm } from '@/features/app/customers/CustomerForm'
 import { TechnicianForm } from '@/features/app/technicians/TechnicianForm'
+import ProductPickerModal from './ProductPickerModal'
+import ServicePickerModal from './ServicePickerModal'
 
 type FormState = {
     customer_id: string
     customer_label?: string
     technician?: string | null
     technician_label?: string
-    entry_date: string // ISO
+    entry_date: string // date-only YYYY-MM-DD
     entry_time: string // HH:mm (guardado junto no ISO via combine na submissão)
     expected_date?: string | null
     expected_time?: string | null
@@ -28,7 +32,7 @@ type FormState = {
     executed_service?: string
     notes?: string | null
     status: 'OPEN' | 'IN_PROGRESS' | 'AWAITING_PARTS' | 'READY' | 'DELIVERED' | 'CANCELLED'
-    payment_method?: 'CASH' | 'CARD' | 'PIX' | 'TRANSFER' | ''
+    payment_method?: 'CASH' | 'CARD' | 'PIX' | 'TRANSFER' | 'FIADO' | ''
     labor_price: number
     parts_total?: number
     shipping_total?: number
@@ -36,28 +40,37 @@ type FormState = {
     items: { kind: 'PRODUCT' | 'SERVICE'; product_id?: string | null; description: string; qty: number; unit_price: number; total?: number }[]
 }
 
-// status options are not used here (status locked to OPEN on create)
+// Status options (editable on edit)
+const statusOptions = [
+    { value: 'OPEN', label: 'Aberta' },
+    { value: 'IN_PROGRESS', label: 'Em andamento' },
+    { value: 'AWAITING_PARTS', label: 'Aguardando peças' },
+    { value: 'READY', label: 'Pronta' },
+    { value: 'DELIVERED', label: 'Entregue' },
+    { value: 'CANCELLED', label: 'Cancelada' },
+]
 
 const paymentOptions = [
     { value: 'CASH', label: 'Dinheiro' },
     { value: 'CARD', label: 'Cartão' },
     { value: 'PIX', label: 'PIX' },
     { value: 'TRANSFER', label: 'Transferência' },
+    { value: 'FIADO', label: 'Fiado' },
 ]
 
 export default function OrderNewEditPage() {
     const navigate = useNavigate()
     const { id } = useParams()
     const [loading, setLoading] = useState(false)
-    const [, setNextTicket] = useState<string>('')
+    const [ticketNumber, setTicketNumber] = useState<string>('')
     const [form, setForm] = useState<FormState>({
         customer_id: '',
         customer_label: '',
         technician: '',
         technician_label: '',
-        entry_date: new Date().toISOString(),
-        entry_time: new Date().toTimeString().slice(0, 5),
-        expected_date: '',
+    entry_date: new Date().toISOString().slice(0,10),
+    entry_time: new Date().toTimeString().slice(0, 5),
+    expected_date: '',
         expected_time: '',
         devices: [],
         informed_problem: '',
@@ -77,10 +90,9 @@ export default function OrderNewEditPage() {
     const [customerFormOpen, setCustomerFormOpen] = useState(false)
     const [creatingCustomer, setCreatingCustomer] = useState(false)
     const [technicianOptions, setTechnicianOptions] = useState<{ value: string; label: string }[]>([])
-    const [productOptions, setProductOptions] = useState<{ value: string; label: string; price?: number }[]>([])
-    const [serviceOptions, setServiceOptions] = useState<{ value: string; label: string; price?: number }[]>([])
-    const [productQuery, setProductQuery] = useState('')
-    const [serviceQuery, setServiceQuery] = useState('')
+    const [productPickerOpen, setProductPickerOpen] = useState(false)
+    const [servicePickerOpen, setServicePickerOpen] = useState(false)
+    const [productStocks, setProductStocks] = useState<Record<string, number>>({})
 
     useEffect(() => {
         if (!id) return
@@ -92,19 +104,19 @@ export default function OrderNewEditPage() {
                         ...prev,
                         customer_id: data.customer_id ?? '',
                         customer_label: data.customer?.full_name ?? '',
-                        technician: data.assigned_to ?? '',
-                        technician_label: data.technician?.full_name ?? '',
-                        entry_date: data.created_at,
+                        technician: (data.technician_id ?? data.assigned_to) ?? '',
+                        technician_label: (data.technician?.full_name ?? data.technician_user?.full_name) ?? '',
+                        entry_date: new Date(data.created_at).toISOString().slice(0,10),
                         entry_time: new Date(data.created_at).toTimeString().slice(0, 5),
-                        expected_date: data.delivered_at ?? '',
-                        expected_time: data.delivered_at ? new Date(data.delivered_at).toTimeString().slice(0, 5) : '',
+                        expected_date: data.due_date ? new Date(data.due_date).toISOString().slice(0,10) : '',
+                        expected_time: data.due_date ? new Date(data.due_date).toTimeString().slice(0, 5) : '',
                         devices: (data.devices ?? []).map((d: any) => ({ device_id: d.device?.id, brand: d.device?.brand, model: d.device?.model, imei: d.device?.imei, color: d.device?.color, notes: d.device?.notes })),
                         informed_problem: data.problem_description ?? '',
                         diagnostics: data.diagnostics ?? '',
-                        executed_service: '',
+                        executed_service: data.executed_service ?? '',
                         notes: (data as any).notes ?? '',
                         status: data.status,
-                        payment_method: '',
+                        payment_method: (data.payment_method as any) || '',
                         labor_price: data.labor_price ?? 0,
                         parts_total: 0,
                         shipping_total: 0,
@@ -118,6 +130,17 @@ export default function OrderNewEditPage() {
                             total: Number(it.total || (Number(it.qty || 0) * Number(it.unit_price || 0))),
                         })),
                     }))
+                    // Hydrate current stock for product items so the Stock column shows values when editing
+                    try {
+                        const productIds = Array.from(new Set((data.items ?? [])
+                          .map((it: any) => it.product_id)
+                          .filter((v: any) => !!v))) as string[]
+                        if (productIds.length) {
+                            const stockMap = await apiProducts.getStockFor(productIds)
+                            setProductStocks((prev) => ({ ...prev, ...stockMap }))
+                        }
+                    } catch { /* ignore stock preload errors */ }
+                    setTicketNumber((data as any)?.ticket_number ?? '')
                 } catch (e: any) {
                     toast.error(e?.message ?? 'Falha ao carregar ordem')
                 } finally {
@@ -132,16 +155,18 @@ export default function OrderNewEditPage() {
             ; (async () => {
                 try {
                     const preview = await apiOrders.previewTicket()
-                    setNextTicket(preview)
+                    setTicketNumber(preview)
                 } catch {
-                    setNextTicket('')
+                    setTicketNumber('')
                 }
                 // default expected delivery = entry date + 7 days, same time
                 const base = new Date()
                 const expected = new Date(base)
                 expected.setDate(base.getDate() + 7)
-                change('expected_date', expected.toISOString())
+                change('expected_date', expected.toISOString().slice(0,10))
                 change('expected_time', new Date(base).toTimeString().slice(0, 5))
+                // default one device pre-filled when creating a new order
+                setForm((p) => ({ ...p, devices: p.devices?.length ? p.devices : [{ brand: '', model: '', imei: '', color: '', notes: '' }] }))
             })()
     }, [id])
     const [technicianLoading, setTechnicianLoading] = useState(false)
@@ -151,13 +176,16 @@ export default function OrderNewEditPage() {
     const computedParts = useMemo(() => (form.items ?? [])
         .filter((i) => i.kind === 'PRODUCT')
         .reduce((acc, i) => acc + Number(i.total ?? ((i.qty * i.unit_price) || 0)), 0), [form.items])
+    const computedServices = useMemo(() => (form.items ?? [])
+        .filter((i) => i.kind === 'SERVICE')
+        .reduce((acc, i) => acc + Number(i.total ?? ((i.qty * i.unit_price) || 0)), 0), [form.items])
     const total = useMemo(() => {
         const parts = Number(computedParts || 0)
+        const services = Number(computedServices || 0)
         const shipping = Number(form.shipping_total || 0)
-        const labor = Number(form.labor_price || 0)
         const discount = Number(form.discount_amount || 0)
-        return Math.max(0, parts + shipping + labor - discount)
-    }, [computedParts, form.shipping_total, form.labor_price, form.discount_amount])
+        return Math.max(0, parts + services + shipping - discount)
+    }, [computedParts, computedServices, form.shipping_total, form.discount_amount])
 
     function change<K extends keyof FormState>(key: K, val: FormState[K]) {
         setForm((p) => ({ ...p, [key]: val }))
@@ -169,13 +197,21 @@ export default function OrderNewEditPage() {
             if (id) {
                 await apiOrders.update(id, {
                     problem_description: form.informed_problem,
-                    labor_price: form.labor_price,
+                    diagnostics: form.diagnostics ?? '',
+                    executed_service: form.executed_service ?? '',
+                    labor_price: Number(computedServices || 0),
                     discount_amount: form.discount_amount,
                     tax_amount: form.shipping_total ?? 0,
                     status: form.status,
+                    notes: form.notes ?? '',
+                    // Build local timestamp without converting to UTC to avoid +3h drift
+                    due_date: (form.expected_date && form.expected_time)
+                        ? `${form.expected_date.slice(0,10)}T${form.expected_time}:00`
+                        : (form.expected_date ? `${form.expected_date.slice(0,10)}T00:00:00` : null),
                     delivered_at: form.status === 'DELIVERED' ? new Date().toISOString() : null,
-                    assigned_to: form.technician || null,
                     devices: form.devices,
+                    payment_method: (form.payment_method as any) || undefined,
+                    technician_id: form.technician || null,
                     items: form.items.map((i) => ({ kind: i.kind, product_id: i.product_id ?? null, description: i.description, qty: i.qty, unit_price: i.unit_price, total: i.total })),
                 })
                 toast.success('Ordem atualizada')
@@ -184,12 +220,20 @@ export default function OrderNewEditPage() {
                 const created = await apiOrders.create({
                     customer_id: form.customer_id,
                     problem_description: form.informed_problem,
-                    labor_price: form.labor_price,
-                    assigned_to: form.technician || null,
+                    diagnostics: form.diagnostics ?? '',
+                    executed_service: form.executed_service ?? '',
+                    labor_price: Number(computedServices || 0),
                     tax_amount: form.shipping_total ?? 0,
                     discount_amount: form.discount_amount ?? 0,
+                    status: form.status,
+                    notes: form.notes ?? '',
+                    due_date: (form.expected_date && form.expected_time)
+                        ? `${form.expected_date.slice(0,10)}T${form.expected_time}:00`
+                        : (form.expected_date ? `${form.expected_date.slice(0,10)}T00:00:00` : null),
                     devices: form.devices,
+                    technician_id: form.technician || null,
                     items: form.items.map((i) => ({ kind: i.kind, product_id: i.product_id ?? null, description: i.description, qty: i.qty, unit_price: i.unit_price, total: i.total })),
+                    payment_method: (form.payment_method as any) || undefined,
                 })
                 toast.success('Ordem criada')
                 navigate(`/app/orders/${created.id}`)
@@ -292,39 +336,33 @@ export default function OrderNewEditPage() {
             setCreatingTechnician(false)
         }
     }
-    async function searchProducts(q: string) {
-        setProductQuery(q)
-        const rows = await apiProductSearch.search(q)
-        setProductOptions(rows.map((r: any) => ({ value: r.id, label: `${r.sku} · ${r.name}`, price: undefined })))
-    }
-    async function searchServices(q: string) {
-        setServiceQuery(q)
-        const rows = await apiServiceSearch.search(q)
-        setServiceOptions(rows.map((r: any) => ({ value: r.id, label: `${r.sku ? `${r.sku} · ` : ''}${r.name}`, price: r.unit_price })))
-    }
-
-    function addProduct(opt: { value: string; label: string; price?: number }) {
-        const price = Number(opt.price ?? 0)
-        const existsIdx = form.items.findIndex((i) => i.kind === 'PRODUCT' && i.product_id === opt.value)
-        if (existsIdx >= 0) {
-            const next = [...form.items]
-            const it = next[existsIdx]
-            const qty = it.qty + 1
-            next[existsIdx] = { ...it, qty, total: qty * it.unit_price }
-            change('items', next)
-        } else {
-            const next = [...form.items, { kind: 'PRODUCT' as const, product_id: opt.value, description: opt.label, qty: 1, unit_price: price, total: price }]
-            change('items', next)
+    function addProductsFromPicker(rows: Array<{ id: string; sku: string; name: string; unit_price: number; stock_qty?: number }>) {
+        const next = [...form.items]
+        const nextStocks: Record<string, number> = { ...productStocks }
+        for (const r of rows) {
+            const existsIdx = next.findIndex((i) => i.kind === 'PRODUCT' && i.product_id === r.id)
+            if (existsIdx >= 0) {
+                // já existe: não adicionar duplicado
+                continue
+            } else {
+                const price = Number(r.unit_price || 0)
+                next.push({ kind: 'PRODUCT', product_id: r.id, description: `${r.sku} · ${r.name}`, qty: 1, unit_price: price, total: price })
+                if (typeof r.stock_qty === 'number') { nextStocks[r.id] = Number(r.stock_qty) }
+            }
         }
-        setProductOptions([])
-        setProductQuery('')
-    }
-    function addService(opt: { value: string; label: string; price?: number }) {
-        const price = Number(opt.price ?? 0)
-        const next = [...form.items, { kind: 'SERVICE' as const, product_id: null, description: opt.label, qty: 1, unit_price: price, total: price }]
+        setProductStocks(nextStocks)
         change('items', next)
-        setServiceOptions([])
-        setServiceQuery('')
+    }
+    function addServicesFromPicker(rows: Array<{ id: string; sku?: string | null; name: string; unit_price: number }>) {
+        const next = [...form.items]
+        for (const r of rows) {
+            const price = Number(r.unit_price || 0)
+            const desc = `${r.sku ? `${r.sku} · ` : ''}${r.name}`
+            const exists = next.some((i) => i.kind === 'SERVICE' && i.description === desc)
+            if (exists) continue
+            next.push({ kind: 'SERVICE', product_id: null, description: desc , qty: 1, unit_price: price, total: price })
+        }
+        change('items', next)
     }
     function updateItem(idx: number, patch: Partial<FormState['items'][number]>) {
         const next = [...form.items]
@@ -340,16 +378,16 @@ export default function OrderNewEditPage() {
     return (
         <div className="flex flex-col gap-4">
             {/* Cabeçalho e contato */}
-            <Card className="p-4 space-y-4">
+            <Card className="p-4 space-y-2">
                 <div className="grid md:grid-cols-4 gap-4">
-                    <CustomInput name="ticket" label="Nº da Ordem" value={id ?? '—'} disabled onChange={() => { }} />
+                    <CustomInput name="ticket" label="Nº da Ordem" value={ticketNumber || '—'} disabled onChange={() => { }} />
                 </div>
 
                 <div className="grid md:grid-cols-2 gap-4">
                     <div className="flex gap-2 items-end w-full">
                         <CustomSelect
                             name="technician"
-                            label="Técnico/Responsável"
+                            label="Técnico"
                             placeholder="Busque por nome"
                             value={form.technician || ''}
                             options={technicianOptions}
@@ -390,8 +428,16 @@ export default function OrderNewEditPage() {
 
                 </div>
                 <div className="grid md:grid-cols-4 gap-4">
-
-
+                    {id ? (
+                        <CustomSelect
+                            name="status"
+                            label="Status"
+                            placeholder="Selecione"
+                            value={form.status}
+                            options={statusOptions}
+                            onChange={(v) => change('status', v as any)}
+                        />
+                    ) : null}
                     <CustomSelect name="payment_method" label="Forma de Pagamento" placeholder="Selecione" value={form.payment_method as any} options={paymentOptions} onChange={(v) => change('payment_method', v as any)} />
                 </div>
             </Card>
@@ -402,37 +448,82 @@ export default function OrderNewEditPage() {
                     <div className="font-medium flex items-center gap-2"><Smartphone className="h-4 w-4" /> Equipamentos</div>
                     <Button size="sm" variant="outline" onClick={() => change('devices', [...form.devices, { brand: '', model: '', imei: '', color: '', notes: '' }])}><Plus className="h-4 w-4 mr-1" /> Adicionar</Button>
                 </div>
-                {form.devices.length === 0 && (
+                {/* Always at least one device on new; keep hint only if editing and zero */}
+                {form.devices.length === 0 && id && (
                     <div className="text-sm text-muted-foreground">Nenhum equipamento adicionado.</div>
                 )}
                 {form.devices.map((d, idx) => (
-                    <div key={idx} className="grid md:grid-cols-5 gap-3">
-                        <CustomInput name={`brand_${idx}`} label="Marca" value={d.brand ?? ''} onChange={(v) => { const next = [...form.devices]; next[idx] = { ...next[idx], brand: v }; change('devices', next) }} />
-                        <CustomInput name={`model_${idx}`} label="Modelo" value={d.model ?? ''} onChange={(v) => { const next = [...form.devices]; next[idx] = { ...next[idx], model: v }; change('devices', next) }} />
-                        <CustomInput name={`imei_${idx}`} label="IMEI/Série" value={d.imei ?? ''} onChange={(v) => { const next = [...form.devices]; next[idx] = { ...next[idx], imei: v }; change('devices', next) }} />
-                        <CustomInput name={`color_${idx}`} label="Cor" value={d.color ?? ''} onChange={(v) => { const next = [...form.devices]; next[idx] = { ...next[idx], color: v }; change('devices', next) }} />
-                        <div className="flex items-end gap-2">
-                            <CustomInput name={`notes_${idx}`} label="Acessórios/Notas" value={d.notes ?? ''} onChange={(v) => { const next = [...form.devices]; next[idx] = { ...next[idx], notes: v }; change('devices', next) }} />
-                            <Button size="sm" variant="ghost" onClick={() => change('devices', form.devices.filter((_, i) => i !== idx))}>Remover</Button>
+                    <Card key={idx} className="relative px-3 py-4">
+                        <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            className="absolute right-2 top-2 size-7"
+                            onClick={() => change('devices', form.devices.filter((_, i) => i !== idx))}
+                            aria-label="Remover equipamento"
+                            title="Remover equipamento"
+                            disabled={form.devices.length <= 1}
+                        >
+                            <X className="h-4 w-4 " />
+                        </Button>
+                        <div className="grid md:grid-cols-12 gap-3">
+                            <div className="md:col-span-3">
+                                <CustomInput name={`brand_${idx}`} label="Marca" value={d.brand ?? ''} onChange={(v) => { const next = [...form.devices]; next[idx] = { ...next[idx], brand: v }; change('devices', next) }} />
+                            </div>
+                            <div className="md:col-span-4">
+                                <CustomInput name={`model_${idx}`} label="Modelo" value={d.model ?? ''} onChange={(v) => { const next = [...form.devices]; next[idx] = { ...next[idx], model: v }; change('devices', next) }} />
+                            </div>
+                            <div className="md:col-span-3">
+                                <CustomInput name={`imei_${idx}`} label="IMEI/Série" value={d.imei ?? ''} onChange={(v) => { const next = [...form.devices]; next[idx] = { ...next[idx], imei: v }; change('devices', next) }} />
+                            </div>
+                            <div className="md:col-span-2">
+                                <CustomInput name={`color_${idx}`} label="Cor" value={d.color ?? ''} onChange={(v) => { const next = [...form.devices]; next[idx] = { ...next[idx], color: v }; change('devices', next) }} />
+                            </div>
+                            <div className="md:col-span-12">
+                                <CustomInput name={`notes_${idx}`} label="Notas" value={d.notes ?? ''} onChange={(v) => { const next = [...form.devices]; next[idx] = { ...next[idx], notes: v }; change('devices', next) }} />
+                            </div>
                         </div>
-                    </div>
+                    </Card>
                 ))}
             </Card>
 
-            {/* Problemas e serviços */}
-            <Card className=" p-4 space-y-4">
-                <div className="grid gap-2">
-                    <label className="text-sm font-medium">Problema Informado</label>
-                    <Textarea value={form.informed_problem} onChange={(e) => change('informed_problem', e.target.value)} placeholder="Ex.: não liga, sem sinal, etc." />
-                </div>
-                <div className="grid gap-2">
-                    <label className="text-sm font-medium">Problema Constatado</label>
-                    <Textarea value={form.diagnostics ?? ''} onChange={(e) => change('diagnostics', e.target.value)} placeholder="Ex.: placa danificada, oxidação, etc." />
-                </div>
-                <div className="grid gap-2">
-                    <label className="text-sm font-medium">Serviço Executado</label>
-                    <Textarea value={form.executed_service ?? ''} onChange={(e) => change('executed_service', e.target.value)} placeholder="Descreva o que foi realizado" />
-                </div>
+            {/* Problemas e observações (Tabs em 4 seções) */}
+            <Card className=" p-4">
+                <Tabs defaultValue="informado" className="w-full">
+                    <TabsList className="grid grid-cols-3">
+                        {([
+                            { key: 'informado', label: 'Problema Informado', done: !!form.informed_problem?.trim() },
+                            { key: 'constatado', label: 'Problema Constatado', done: !!form.diagnostics?.trim() },
+                            { key: 'executado', label: 'Serviço Executado', done: !!form.executed_service?.trim() },
+                        ] as const).map(t => (
+                            <TabsTrigger key={t.key} value={t.key} className={t.done ? 'text-emerald-700 data-[state=active]:text-emerald-900' : ''}>
+                                <span className="inline-flex items-center gap-2">
+                                    {t.done ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> : <Circle className="h-3.5 w-3.5 text-muted-foreground" />}
+                                    {t.label}
+                                </span>
+                            </TabsTrigger>
+                        ))}
+                    </TabsList>
+
+                    <TabsContent value="informado" className="space-y-4">
+                        <div className="grid gap-2">
+                            <Textarea value={form.informed_problem} onChange={(e) => change('informed_problem', e.target.value)} placeholder="Ex.: não liga, sem sinal, etc." />
+                        </div>
+                    </TabsContent>
+
+                    <TabsContent value="constatado" className="space-y-4">
+                        <div className="grid gap-2">
+                            <Textarea value={form.diagnostics ?? ''} onChange={(e) => change('diagnostics', e.target.value)} placeholder="Ex.: placa danificada, oxidação, etc." />
+                        </div>
+                    </TabsContent>
+
+                    <TabsContent value="executado" className="space-y-4">
+                        <div className="grid gap-2">
+                            <Textarea value={form.executed_service ?? ''} onChange={(e) => change('executed_service', e.target.value)} placeholder="Descreva o que foi realizado" />
+                        </div>
+                    </TabsContent>
+                </Tabs>
+
                 <div className="grid gap-2">
                     <label className="text-sm font-medium">Observações</label>
                     <Textarea value={form.notes ?? ''} onChange={(e) => change('notes', e.target.value)} placeholder="Informações adicionais do cliente/serviço" />
@@ -441,47 +532,15 @@ export default function OrderNewEditPage() {
 
             {/* Itens (Produtos/Serviços) - placeholder scaffolding (optional next: full grid component) */}
             <Card className="p-4">
-                <div className="flex items-center justify-between">
-                    <div className="font-medium flex items-center gap-2"><ShoppingBag className="h-4 w-4" /> Itens</div>
-                    <div className="flex gap-2">
-                        <Button size="sm" variant="outline" onClick={() => void searchProducts('')}><Search className="h-4 w-4 mr-1" /> Produtos</Button>
-                        <Button size="sm" variant="outline" onClick={() => void searchServices('')}><Wrench className="h-4 w-4 mr-1" /> Serviços</Button>
-                    </div>
-                </div>
-                <div className="grid md:grid-cols-2 gap-3">
-                    <div className="grid gap-1">
-                        <label className="text-sm font-medium">Adicionar produto</label>
-                        <div className="relative">
-                            <CustomInput name="product_search" label="" value={productQuery} placeholder="Busque por SKU ou nome" onChange={(v) => void searchProducts(v)} />
-                            {productOptions.length > 0 && (
-                                <div className="absolute z-10 mt-1 max-h-56 w-full overflow-auto rounded-md border bg-background p-1 shadow">
-                                    {productOptions.map((o) => (
-                                        <button key={o.value} type="button" className="w-full rounded px-2 py-1 text-left hover:bg-accent" onClick={() => addProduct(o)}>
-                                            {o.label}
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
+                <div>
+                    <div className="flex items-center justify-between">
+                        <div className="font-medium flex items-center gap-2"><ShoppingBag className="h-4 w-4" /> Itens</div>
+                        <div className="flex gap-2">
+                            <Button size="sm" variant="outline" onClick={() => setProductPickerOpen(true)}><Plus className="h-4 w-4 mr-1" /> Produtos</Button>
+                            <Button size="sm" variant="outline" onClick={() => setServicePickerOpen(true)}><Plus className="h-4 w-4 mr-1" /> Serviços</Button>
                         </div>
                     </div>
-                    <div className="grid gap-1">
-                        <label className="text-sm font-medium">Adicionar serviço</label>
-                        <div className="relative">
-                            <CustomInput name="service_search" label="" value={serviceQuery} placeholder="Busque por nome" onChange={(v) => void searchServices(v)} />
-                            {serviceOptions.length > 0 && (
-                                <div className="absolute z-10 mt-1 max-h-56 w-full overflow-auto rounded-md border bg-background p-1 shadow">
-                                    {serviceOptions.map((o) => (
-                                        <button key={o.value} type="button" className="w-full rounded px-2 py-1 text-left hover:bg-accent" onClick={() => addService(o)}>
-                                            {o.label}
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                </div>
 
-                {form.items.length > 0 && (
                     <div className="mt-2 overflow-x-auto">
                         <table className="w-full text-sm">
                             <thead>
@@ -490,44 +549,71 @@ export default function OrderNewEditPage() {
                                     <th className="px-2 py-1">Descrição</th>
                                     <th className="px-2 py-1 w-24">Qtde</th>
                                     <th className="px-2 py-1 w-32">Preço (R$)</th>
+                                    <th className="px-2 py-1 w-24 text-right">Estoque</th>
                                     <th className="px-2 py-1 w-32">Total (R$)</th>
                                     <th className="px-2 py-1 w-10"></th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {form.items.map((it, idx) => (
-                                    <tr key={idx} className="border-t">
-                                        <td className="px-2 py-1 align-middle">{it.kind === 'PRODUCT' ? 'Produto' : 'Serviço'}</td>
-                                        <td className="px-2 py-1 align-middle">{it.description}</td>
-                                        <td className="px-2 py-1 align-middle">
-                                            <CustomInput name={`qty_${idx}`} label="" value={String(it.qty)} onChange={(v) => updateItem(idx, { qty: Number(v.replace(/[^0-9-]/g, '')) || 0 })} />
-                                        </td>
-                                        <td className="px-2 py-1 align-middle">
-                                            <CustomInput name={`price_${idx}`} label="" value={String(it.unit_price)} onChange={(v) => updateItem(idx, { unit_price: Number(v.replace(/[^0-9.,-]/g, '').replace(',', '.')) || 0 })} />
-                                        </td>
-                                        <td className="px-2 py-1 align-middle">{Number(it.total || (it.qty * it.unit_price)).toFixed(2)}</td>
-                                        <td className="px-2 py-1 align-middle text-right">
-                                            <button type="button" className="inline-flex items-center rounded px-2 py-1 hover:bg-accent" onClick={() => removeItem(idx)}>
-                                                <Trash2 className="h-4 w-4" />
-                                            </button>
-                                        </td>
+                                {form.items.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={7} className="px-2 py-4 text-center text-muted-foreground">Nenhum item adicionado.</td>
                                     </tr>
-                                ))}
+                                ) : (
+                                    form.items.map((it, idx) => (
+                                        <tr key={idx} className="border-t">
+                                            <td className="px-2 py-1 align-middle">{it.kind === 'PRODUCT' ? 'Produto' : 'Serviço'}</td>
+                                            <td className="px-2 py-1 align-middle">{it.description}</td>
+                                            <td className="px-2 py-1 align-middle">
+                                                <CustomInput name={`qty_${idx}`} label="" value={String(it.qty)} onChange={(v) => updateItem(idx, { qty: Number(v.replace(/[^0-9-]/g, '')) || 0 })} />
+                                            </td>
+                                            <td className="px-2 py-1 align-middle">
+                                                <CustomInput name={`price_${idx}`} label="" value={formatBRL(Number(it.unit_price || 0))} onChange={() => { }} disabled />
+                                            </td>
+                                            <td className="px-2 py-1 align-middle text-right">
+                                                {it.kind === 'PRODUCT' && it.product_id ? (
+                                                    (() => {
+                                                        const qty = productStocks[String(it.product_id)]
+                                                        if (typeof qty !== 'number') return <span className="text-muted-foreground">-</span>
+                                                        const critical = qty <= 0
+                                                        const cls = critical ? 'bg-rose-600 text-white border-transparent' : 'bg-emerald-600 text-white border-transparent'
+                                                        const Icon = critical ? AlertTriangle : CheckCircle
+                                                        return (
+                                                            <Badge className={`px-2 py-0.5 gap-1.5 ${cls}`}>
+                                                                <Icon className="size-3.5" />
+                                                                {qty}
+                                                            </Badge>
+                                                        )
+                                                    })()
+                                                ) : (
+                                                    <span className="text-muted-foreground">-</span>
+                                                )}
+                                            </td>
+                                            <td className="px-2 py-1 align-middle">{Number(it.total || (it.qty * it.unit_price)).toFixed(2)}</td>
+                                            <td className="px-2 py-1 align-middle text-right">
+                                                <button type="button" className="inline-flex items-center rounded px-2 py-1 hover:bg-accent" onClick={() => removeItem(idx)}>
+                                                    <Trash2 className="h-4 w-4" />
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    ))
+                                )}
                             </tbody>
                         </table>
                     </div>
-                )}
+                </div>
+
             </Card>
 
             {/* Totais */}
             <Card className="p-4 space-y-4">
                 <div className="grid md:grid-cols-5 gap-4">
-                    <CustomInput name="labor_price" label="Serviço (R$)" value={formatBRL(form.labor_price)} onChange={(v) => change('labor_price', parseBRL(v))} />
-                    <CustomInput name="parts_total" label="Peças (R$)" value={formatBRL(computedParts)} onChange={() => { }} disabled />
-                    <CustomInput name="shipping_total" label="Deslocamento (R$)" value={formatBRL(form.shipping_total ?? 0)} onChange={(v) => change('shipping_total', parseBRL(v))} />
-                    <CustomInput name="discount_amount" label="Desconto (R$)" value={formatBRL(form.discount_amount ?? 0)} onChange={(v) => change('discount_amount', parseBRL(v))} />
+                    <CustomInput name="labor_price" label="Serviço" value={formatBRL(computedServices)} onChange={() => { }} disabled />
+                    <CustomInput name="parts_total" label="Peças" value={formatBRL(computedParts)} onChange={() => { }} disabled />
+                    <CustomInput name="shipping_total" label="Deslocamento" value={formatBRL(form.shipping_total ?? 0)} onChange={(v) => change('shipping_total', parseBRL(v))} />
+                    <CustomInput name="discount_amount" label="Desconto" value={formatBRL(form.discount_amount ?? 0)} onChange={(v) => change('discount_amount', parseBRL(v))} />
                     <div>
-                        <div className="text-sm font-medium flex items-center gap-1"><DollarSign className="h-4 w-4" /> Total R$</div>
+                        <div className="text-sm font-medium flex items-center gap-1">Total</div>
                         <div className="text-2xl font-semibold">{formatBRL(total)}</div>
                     </div>
                 </div>
@@ -549,6 +635,8 @@ export default function OrderNewEditPage() {
                 loading={creatingTechnician}
                 onSubmit={createTechnicianInline}
             />
+            <ProductPickerModal open={productPickerOpen} onOpenChange={setProductPickerOpen} onConfirm={addProductsFromPicker} />
+            <ServicePickerModal open={servicePickerOpen} onOpenChange={setServicePickerOpen} onConfirm={addServicesFromPicker} />
         </div>
     )
 }

@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { apiInventory, apiProducts, apiProductSuppliers } from '@/lib/api'
 import type { IColumns, IPagination } from '@/types'
 import { CustomTable } from '@/components/custom/Table/CustomTable'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { ArrowLeft, Pencil } from 'lucide-react'
+import { ArrowLeft, Pencil, ShoppingCart, Wrench } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { formatBRL } from '@/lib/format'
 import { ProductForm } from './ProductForm'
@@ -15,6 +15,7 @@ export default function ProductDetailsPage() {
   const navigate = useNavigate()
   const { sku } = useParams<{ sku: string }>()
   const [product, setProduct] = useState<any | null>(null)
+  const [orderTickets, setOrderTickets] = useState<Record<string, string>>({})
   const [pagination, setPagination] = useState<IPagination>({
     sortField: 'occurred_at', sortOrder: 'DESC', search: '', currentPage: 1, itemsPerPage: 10,
     currentTotalItems: 0, totalItems: 0, totalPages: 1,
@@ -63,6 +64,32 @@ export default function ProductDetailsPage() {
   useEffect(() => { if (product?.id) { void fetchSuppliers(); void fetchMovements() } }, [product?.id])
   useEffect(() => { if (product?.id) void fetchMovements() }, [pagination.currentPage, pagination.itemsPerPage, pagination.sortField, pagination.sortOrder])
 
+  // Prefetch OS tickets for origin badges
+  useEffect(() => {
+    (async () => {
+      try {
+        const ids = Array.from(
+          new Set(
+            (rows || [])
+              .filter((r: any) => r.reference_type === 'SERVICE_ORDER' && r.reference_id)
+              .map((r: any) => r.reference_id as string)
+          )
+        ).filter((id: string) => !!id && !orderTickets[id])
+        if (!ids.length) return
+        const { data, error } = await (await import('@/lib/supabaseClient')).supabase
+          .from('service_orders')
+          .select('id, ticket_number')
+          .in('id', ids)
+        if (error) throw error
+        const next: Record<string, string> = { ...orderTickets }
+        for (const row of data ?? []) next[(row as any).id] = (row as any).ticket_number ?? ''
+        setOrderTickets(next)
+      } catch {
+        // ignore
+      }
+    })()
+  }, [rows])
+
   const onRequest = (updated: IPagination) => setPagination(updated)
 
   const columns: IColumns[] = [
@@ -77,6 +104,32 @@ export default function ProductDetailsPage() {
     } },
     { label: 'Quantidade', field: 'qty', sortable: true },
     { label: 'Motivo', field: 'reason', sortable: true, format: (v) => v ?? '-' },
+    { label: 'Origem', field: 'reference_id', sortable: false, component: ({ row }) => {
+      const r = row as any
+      if (!r.reference_id || !r.reference_type) return <span className="text-muted-foreground">-</span>
+      if (r.reference_type === 'SERVICE_ORDER') {
+        const ticket = orderTickets[r.reference_id] ?? 'OS'
+        return (
+          <Link to={`/app/orders/${r.reference_id}`} className="no-underline">
+            <Badge className="px-2 py-0.5 gap-1.5 bg-indigo-100 text-indigo-800 hover:bg-indigo-200">
+              <Wrench className="size-3.5" /> {ticket}
+            </Badge>
+          </Link>
+        )
+      }
+      if (r.reference_type === 'DIRECT_SALE') {
+        const clean = String(r.reference_id).replace(/-/g, '')
+        const last5 = clean.slice(-5).toUpperCase()
+        return (
+          <Link to={`/app/sales/${r.reference_id}`} className="no-underline">
+            <Badge className="px-2 py-0.5 gap-1.5 bg-amber-100 text-amber-800 hover:bg-amber-200">
+              <ShoppingCart className="size-3.5" /> {last5}
+            </Badge>
+          </Link>
+        )
+      }
+      return <span className="text-muted-foreground">-</span>
+    } },
     { label: 'Data', field: 'occurred_at', sortable: true, format: (v) => new Date(v).toLocaleString('pt-BR') },
   ]
 

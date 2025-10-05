@@ -177,6 +177,19 @@ export const apiProducts = {
     if (error) throw error
     return data
   },
+  async getStockFor(ids: string[]): Promise<Record<string, number>> {
+    if (!ids?.length) return {}
+    const { data, error } = await supabase
+      .from('products_with_stock')
+      .select('id,stock_qty')
+      .in('id', ids)
+    if (error) throw error
+    const out: Record<string, number> = {}
+    for (const r of (data ?? []) as any[]) {
+      out[r.id] = Number(r.stock_qty ?? 0)
+    }
+    return out
+  },
   async getBySku(sku: string) {
     const { data, error } = await supabase
       .from('products_with_stock')
@@ -398,15 +411,21 @@ export type NewOrderInput = {
   // legacy single device still accepted but prefer devices[]
   device_id?: string | null
   problem_description: string
+  diagnostics?: string | null
+  executed_service?: string | null
   labor_price?: number
   notes?: string | null
   // optional extras
-  assigned_to?: string | null
+  status?: 'OPEN' | 'IN_PROGRESS' | 'AWAITING_PARTS' | 'READY' | 'DELIVERED' | 'CANCELLED'
+  due_date?: string | null
+  assigned_to?: string | null // legacy: user id; prefer technician_id
+  technician_id?: string | null
   discount_amount?: number
   tax_amount?: number // used as shipping total
   delivered_at?: string | null
   devices?: OrderDeviceInput[]
   items?: OrderItemInput[]
+  payment_method?: 'CASH' | 'CARD' | 'PIX' | 'TRANSFER' | 'FIADO'
 }
 
 export const apiOrders = {
@@ -431,6 +450,7 @@ export const apiOrders = {
   async create(input: NewOrderInput) {
     // 1) create base order
     const cid = await getCompanyIdOrThrow()
+    const uid = (await supabase.auth.getUser()).data.user?.id ?? null
     const { data: order, error } = await supabase
       .from('service_orders')
       .insert({
@@ -438,12 +458,20 @@ export const apiOrders = {
         customer_id: input.customer_id,
         device_id: input.device_id ?? null,
         problem_description: input.problem_description,
+        diagnostics: input.diagnostics ?? null,
+        executed_service: input.executed_service ?? null,
         labor_price: input.labor_price ?? 0,
         notes: input.notes ?? null,
+        status: input.status ?? 'OPEN',
+        due_date: input.due_date ?? null,
         assigned_to: input.assigned_to ?? null,
+        technician_id: input.technician_id ?? null,
         discount_amount: input.discount_amount ?? 0,
         tax_amount: input.tax_amount ?? 0,
         delivered_at: input.delivered_at ?? null,
+        payment_method: input.payment_method ?? null,
+        created_by: uid,
+        created_employee_id: uid,
       })
       .select('*')
       .single()
@@ -451,8 +479,19 @@ export const apiOrders = {
 
     const orderId = (order as any).id as string
 
+    // Audit: create entry
+    await supabase.from('service_order_audit_logs').insert({
+      service_order_id: orderId,
+      actor_user_id: uid,
+      action: 'CREATE',
+      field: null,
+      old_value: null,
+      new_value: JSON.stringify({ customer_id: input.customer_id, device_id: input.device_id ?? null, labor_price: input.labor_price ?? 0, assigned_to: input.assigned_to ?? null, technician_id: input.technician_id ?? null }),
+    })
+
     // 2) devices
     if (input.devices && input.devices.length) {
+      let firstDeviceId: string | null = null
       for (const d of input.devices) {
         let deviceId = d.device_id ?? null
         if (!deviceId && (d.brand && d.model)) {
@@ -473,11 +512,16 @@ export const apiOrders = {
           deviceId = (createdDevice as any).id
         }
         if (deviceId) {
+          if (!firstDeviceId) firstDeviceId = deviceId
           const { error: linkErr } = await supabase
             .from('service_order_devices')
             .insert({ service_order_id: orderId, device_id: deviceId })
           if (linkErr) throw linkErr
         }
+      }
+      // Update header legacy device_id with the first device
+      if (firstDeviceId) {
+        await supabase.from('service_orders').update({ device_id: firstDeviceId }).eq('id', orderId)
       }
     }
 
@@ -499,7 +543,40 @@ export const apiOrders = {
       }
     }
 
-    return order
+    // 4) FIADO: create receivable linked to SERVICE_ORDER when payment_method is FIADO
+    try {
+      if (input.payment_method === 'FIADO') {
+        // Compute total: use service_orders.total_amount (trigger updates it), fetch fresh value
+        const { data: afterOrder } = await supabase
+          .from('service_orders')
+          .select('id, total_amount')
+          .eq('id', orderId)
+          .single()
+        const totalAmt = Number((afterOrder as any)?.total_amount ?? 0)
+        if (totalAmt > 0) {
+          await apiReceivables.create({
+            customer_id: input.customer_id,
+            description: 'Ordem de Serviço',
+            issue_date: new Date().toISOString().slice(0, 10),
+            due_date: null, // nullable by migration 0038
+            amount: totalAmt,
+            notes: 'Gerado automaticamente por OS (fiado)',
+            reference_type: 'SERVICE_ORDER',
+            reference_id: orderId,
+          })
+        }
+      }
+    } catch (_) {
+      // swallow receivable creation errors to not block OS creation
+    }
+
+    // Return fresh order header so fields like device_id are up-to-date
+    const { data: fresh } = await supabase
+      .from('service_orders')
+      .select('*')
+      .eq('id', orderId)
+      .single()
+    return fresh ?? order
   },
   async listPaginated(params: { page: number; pageSize: number; query?: string; sortBy?: string; sortDir?: 'asc' | 'desc' }) {
     const { page, pageSize, query, sortBy = 'created_at', sortDir = 'desc' } = params
@@ -507,7 +584,8 @@ export const apiOrders = {
     const to = from + pageSize - 1
     let q = supabase
       .from('service_orders')
-      .select('id,ticket_number,status,total_amount,created_at, customer:customer_id(full_name,phone)', { count: 'exact' })
+      .select('id,ticket_number,status,total_amount,created_at,due_date, customer:customer_id(full_name,phone), technician:technician_id(full_name,phone), technician_user:assigned_to(full_name,phone)', { count: 'exact' })
+
       .order(sortBy, { ascending: sortDir === 'asc' })
       .range(from, to)
 
@@ -522,23 +600,45 @@ export const apiOrders = {
       ...r,
       customer_name: r.customer?.full_name ?? '-',
       customer_phone: r.customer?.phone ?? null,
+      technician_name: (r.technician?.full_name ?? r.technician_user?.full_name) ?? '-',
+      technician_phone: (r.technician?.phone ?? r.technician_user?.phone) ?? null,
+      due_date: r.due_date ?? null,
     }))
     return { data: rows, count: count ?? 0 }
   },
   async getById(id: string) {
     const { data, error } = await supabase
       .from('service_orders')
-      .select('*, customer:customer_id(full_name,email,phone), device:device_id(*), devices:service_order_devices(device:device_id(*)), items:service_order_items(*), technician:assigned_to(full_name)')
+  .select('*, customer:customer_id(full_name,email,phone), device:device_id(*), devices:service_order_devices(device:device_id(*)), items:service_order_items(*), technician_user:assigned_to(full_name), technician:technician_id(full_name,phone)')
       .eq('id', id)
       .single()
     if (error) throw error
     return data
   },
-  async update(id: string, input: Partial<NewOrderInput> & { status?: 'OPEN' | 'IN_PROGRESS' | 'AWAITING_PARTS' | 'READY' | 'DELIVERED' | 'CANCELLED'; diagnostics?: string; discount_amount?: number; tax_amount?: number; assigned_to?: string | null; delivered_at?: string | null }) {
+  async listAuditLogs(orderId: string) {
+    const { data, error } = await supabase
+      .from('service_order_audit_logs')
+      .select('id, action, field, old_value, new_value, created_at, actor:actor_user_id(id, full_name)')
+      .eq('service_order_id', orderId)
+      .order('created_at', { ascending: false })
+    if (error) throw error
+    return (data ?? []).map((r: any) => ({
+      id: r.id,
+      action: r.action as string,
+      field: r.field as string | null,
+      old_value: r.old_value as string | null,
+      new_value: r.new_value as string | null,
+      created_at: r.created_at as string,
+      actor: r.actor ?? null,
+    }))
+  },
+  async update(id: string, input: Partial<NewOrderInput> & { status?: 'OPEN' | 'IN_PROGRESS' | 'AWAITING_PARTS' | 'READY' | 'DELIVERED' | 'CANCELLED'; diagnostics?: string | null; executed_service?: string | null; discount_amount?: number; tax_amount?: number; assigned_to?: string | null; technician_id?: string | null; delivered_at?: string | null; due_date?: string | null; notes?: string | null; payment_method?: 'CASH' | 'CARD' | 'PIX' | 'TRANSFER' | 'FIADO' }) {
     // 1) update base order fields
-    const base: any = { ...input }
+  const base: any = { ...input }
     delete base.devices
     delete base.items
+    const { data: before, error: getErr } = await supabase.from('service_orders').select('*').eq('id', id).single()
+    if (getErr) throw getErr
     const { data: updated, error } = await supabase
       .from('service_orders')
       .update(base)
@@ -547,11 +647,34 @@ export const apiOrders = {
       .single()
     if (error) throw error
 
+    // Audit: diff simple fields
+    try {
+      const uid = (await supabase.auth.getUser()).data.user?.id ?? null
+      const changed: Record<string, { old: any; val: any }> = {}
+      for (const k of ['status','diagnostics','executed_service','labor_price','discount_amount','tax_amount','assigned_to','technician_id','delivered_at','notes','problem_description','payment_method','due_date'] as const) {
+        if ((before as any)[k] !== (updated as any)[k]) {
+          changed[k] = { old: (before as any)[k], val: (updated as any)[k] }
+        }
+      }
+      const entries = Object.entries(changed).map(([field, { old, val }]) => ({
+        service_order_id: id,
+        actor_user_id: uid,
+        action: 'UPDATE',
+        field,
+        old_value: old == null ? null : String(old),
+        new_value: val == null ? null : String(val),
+      }))
+      if (entries.length) {
+        await supabase.from('service_order_audit_logs').insert(entries)
+      }
+    } catch {}
+
     // 2) replace devices if provided
     if (input.devices) {
       // remove existing links
       const { error: delErr } = await supabase.from('service_order_devices').delete().eq('service_order_id', id)
       if (delErr) throw delErr
+      let firstDeviceId: string | null = null
       for (const d of input.devices) {
         let deviceId = d.device_id ?? null
         if (!deviceId && (d.brand && d.model)) {
@@ -573,12 +696,15 @@ export const apiOrders = {
           deviceId = (createdDevice as any).id
         }
         if (deviceId) {
+          if (!firstDeviceId) firstDeviceId = deviceId
           const { error: linkErr } = await supabase
             .from('service_order_devices')
             .insert({ service_order_id: id, device_id: deviceId })
           if (linkErr) throw linkErr
         }
       }
+      // Update header device_id based on first linked device (or null if none provided)
+      await supabase.from('service_orders').update({ device_id: firstDeviceId }).eq('id', id)
     }
 
     // 3) replace items if provided
@@ -609,9 +735,26 @@ export const apiOrders = {
     if (del.error) {
       // Fallback: cancel order
       const { error } = await supabase.from('service_orders').update({ status: 'CANCELLED' }).eq('id', id)
+      // Audit cancel
+      try {
+        const uid = (await supabase.auth.getUser()).data.user?.id ?? null
+        await supabase.from('service_order_audit_logs').insert({ service_order_id: id, actor_user_id: uid, action: 'CANCEL' })
+      } catch {}
       if (error) throw error
       return 'CANCELLED'
     }
+    // On hard delete, also remove receivables linked to this service order
+    try {
+      await supabase
+        .from('receivables')
+        .delete()
+        .eq('reference_type', 'SERVICE_ORDER')
+        .eq('reference_id', id)
+    } catch {}
+    try {
+      const uid = (await supabase.auth.getUser()).data.user?.id ?? null
+      await supabase.from('service_order_audit_logs').insert({ service_order_id: id, actor_user_id: uid, action: 'DELETE' })
+    } catch {}
     return 'DELETED'
   },
 }
@@ -941,7 +1084,7 @@ export const apiInventory = {
 
 export const apiProductSearch = {
   async search(query: string) {
-    let q = supabase.from('products').select('id,sku,name').is('deleted_at', null).order('name', { ascending: true }).limit(20)
+    let q = supabase.from('products_with_stock').select('id,sku,name,unit_price,stock_qty').order('name', { ascending: true }).limit(20)
     if (query && query.trim()) q = q.or(`sku.ilike.%${query}%,name.ilike.%${query}%`)
     const { data, error } = await q
     if (error) throw error
@@ -1199,16 +1342,18 @@ export const apiReceivables = {
     if (error) throw error
     return (data ?? []).map((r: any) => ({ ...r, remaining: Math.max(0, Number(r.amount || 0) - Number(r.received_total || 0)) }))
   },
-  async create(input: { customer_id?: string | null; description: string; issue_date?: string | null; due_date: string; amount: number; notes?: string | null }) {
+  async create(input: { customer_id?: string | null; description: string; issue_date?: string | null; due_date?: string | null; amount: number; notes?: string | null; reference_type?: 'DIRECT_SALE' | 'SERVICE_ORDER' | null; reference_id?: string | null }) {
     const cid = await getCompanyIdOrThrow()
     const payload: any = {
       company_id: cid,
       customer_id: input.customer_id ?? null,
       description: input.description,
       issue_date: input.issue_date ? input.issue_date.slice(0, 10) : null,
-      due_date: input.due_date.slice(0, 10),
+      due_date: input.due_date ? input.due_date.slice(0, 10) : null,
       amount: Number(input.amount),
-      notes: input.notes ?? null,
+  notes: input.notes ?? null,
+  reference_type: input.reference_type ?? null,
+  reference_id: input.reference_id ?? null,
     }
     const { data, error } = await supabase.from('receivables').insert(payload).select('*').single()
     if (error) throw error
@@ -1238,6 +1383,92 @@ export const apiReceivables = {
       await apiCash.addIncome({ cash_session_id: input.cash_session_id, amount: amt, method: input.method, notes: 'Recebimento' })
     }
     return true
+  },
+
+  // List FIADO (DIRECT_SALE) grouped by customer with pagination
+  async listFiadosByCustomerPaginated(params: { page: number; pageSize: number; sortBy?: 'customer_name' | 'amount' | 'received_total' | 'remaining' | 'status'; sortDir?: 'asc' | 'desc'; query?: string }) {
+    const { page, pageSize, sortBy = 'customer_name', sortDir = 'asc', query } = params
+    // Fetch all open/partial fiados from direct sales with joined customer and payments
+    let q = supabase
+      .from('receivables')
+  .select('id, customer_id, description, amount, received_total, status, reference_type, customer:customer_id(full_name, phone), payments:receivable_payments(amount)')
+      .eq('reference_type', 'DIRECT_SALE')
+      .in('status', ['OPEN','PARTIAL'])
+
+    if (query && query.trim()) {
+      q = q.or(`description.ilike.%${query}%,notes.ilike.%${query}%,customer.full_name.ilike.%${query}%`)
+    }
+
+    const { data, error } = await q
+    if (error) throw error
+    const rows = (data ?? []).map((r: any) => {
+      const received = Array.isArray(r.payments) ? r.payments.reduce((acc: number, p: any) => acc + Number(p.amount || 0), 0) : Number(r.received_total || 0)
+      const remaining = Math.max(0, Number(r.amount || 0) - received)
+      return { ...r, customer_name: r.customer?.full_name ?? '-', customer_phone: r.customer?.phone ?? null, received_total: received, remaining }
+    })
+    // Group by customer_id
+    const map = new Map<string, { customer_id: string | null; customer_name: string; customer_phone?: string | null; amount: number; received_total: number; remaining: number; status: 'OPEN' | 'PARTIAL' | 'PAID' | 'CANCELLED' }>()
+    for (const r of rows) {
+      const key = r.customer_id ?? 'sem-cliente'
+      const prev = map.get(key)
+      const accAmount = Number(r.amount || 0)
+      const accReceived = Number(r.received_total || 0)
+      const accRemaining = Number(r.remaining || 0)
+      if (!prev) {
+        map.set(key, { customer_id: r.customer_id ?? null, customer_name: r.customer_name ?? '-', customer_phone: r.customer_phone ?? null, amount: accAmount, received_total: accReceived, remaining: accRemaining, status: accRemaining > 0 ? (accReceived > 0 ? 'PARTIAL' : 'OPEN') : 'PAID' })
+      } else {
+        const nextAmount = prev.amount + accAmount
+        const nextReceived = prev.received_total + accReceived
+        const nextRemaining = prev.remaining + accRemaining
+        const status = nextRemaining > 0 ? (nextReceived > 0 ? 'PARTIAL' : 'OPEN') : 'PAID'
+        map.set(key, { ...prev, amount: nextAmount, received_total: nextReceived, remaining: nextRemaining, status })
+      }
+    }
+    let list = Array.from(map.values())
+    // Sort
+    list.sort((a, b) => {
+      const dir = sortDir === 'asc' ? 1 : -1
+      switch (sortBy) {
+        case 'amount': return (a.amount - b.amount) * dir
+        case 'received_total': return (a.received_total - b.received_total) * dir
+        case 'remaining': return (a.remaining - b.remaining) * dir
+        case 'status': return (a.status.localeCompare(b.status)) * dir
+        case 'customer_name':
+        default: return (a.customer_name.localeCompare(b.customer_name)) * dir
+      }
+    })
+    const totalItems = list.length
+    const start = (page) * pageSize
+    const end = start + pageSize
+    const paged = list.slice(start, end)
+    return { data: paged, count: totalItems }
+  },
+
+  async listByCustomerFiados(customerId: string) {
+    // Fetch customer header
+  const { data: cust, error: cErr } = await supabase.from('customers').select('id, full_name, email, phone, cep, street, number, complement, neighborhood, city, state').eq('id', customerId).maybeSingle()
+    if (cErr) throw cErr
+    // Fetch receivables linked to DIRECT_SALE for this customer
+    const { data, error } = await supabase
+      .from('receivables')
+      .select('id, description, issue_date, amount, received_total, status, reference_type, reference_id, payments:receivable_payments(id, amount, method, received_at, notes)')
+      .eq('customer_id', customerId)
+      .eq('reference_type', 'DIRECT_SALE')
+      .order('issue_date', { ascending: false })
+    if (error) throw error
+    const receivables = (data ?? []) as any[]
+    const saleIds = receivables.map((r: any) => r.reference_id).filter((v: any) => !!v)
+    let saleMap: Record<string, any> = {}
+    if (saleIds.length) {
+      const { data: sales, error: sErr } = await supabase
+        .from('direct_sale_orders')
+        .select('id, occurred_at, seller:seller_id(id, full_name, phone)')
+        .in('id', saleIds)
+      if (sErr) throw sErr
+      saleMap = Object.fromEntries((sales ?? []).map((s: any) => [s.id, s]))
+    }
+    const enriched = receivables.map((r: any) => ({ ...r, sale: saleMap[r.reference_id ?? ''] ?? null }))
+    return { data: { customer: cust, receivables: enriched } }
   },
 }
 
@@ -1448,6 +1679,269 @@ export const apiSales = {
       .single()
     if (error) throw error
     return data
+  },
+  async createPosSale(input: { customer_id?: string | null; items: Array<{ product_id: string; qty: number; unit_price: number }>; payments: Array<{ method: 'CASH'|'CARD'|'PIX'|'TRANSFER'; amount: number; notes?: string | null }>; notes?: string | null }) {
+    // Extend payments to accept FIADO logically (migration widens DB constraint)
+    const cid = await getCompanyIdOrThrow()
+    if (!input.items?.length) throw new Error('Nenhum item informado')
+    const total = input.items.reduce((acc, it) => acc + Number(it.qty) * Number(it.unit_price), 0)
+    // 1) criar sale order
+  const uid = (await supabase.auth.getUser()).data.user?.id ?? null
+  const { data: sale, error } = await supabase.from('direct_sale_orders').insert({ company_id: cid, customer_id: input.customer_id ?? null, total, notes: input.notes ?? null, seller_id: uid }).select('id').single()
+    if (error) throw error
+    const saleId = (sale as any).id as string
+    // 2) itens
+    const itemsPayload = input.items.map(it => ({ sale_id: saleId, product_id: it.product_id, qty: it.qty, unit_price: it.unit_price, total: Number(it.qty) * Number(it.unit_price) }))
+    const { error: itemsErr } = await supabase.from('direct_sale_items').insert(itemsPayload)
+    if (itemsErr) throw itemsErr
+    // 3) baixa de estoque
+    for (const it of input.items) {
+      const qty = Number(it.qty)
+      if (qty > 0) {
+        const { error: invErr } = await supabase.from('inventory_movements').insert({ company_id: cid, product_id: it.product_id, type: 'OUT', qty, reason: 'Venda PDV', reference_id: saleId, reference_type: 'DIRECT_SALE' })
+        if (invErr) throw invErr
+      }
+    }
+  // 4) pagamentos
+  let cashSessionId: string | null = null
+  try { const s = await apiCash.getOpenSession(); cashSessionId = (s as any)?.id ?? null } catch { cashSessionId = null }
+    const paysPayload = input.payments.map(p => ({ sale_id: saleId, method: p.method as any, amount: Number(p.amount), notes: p.notes ?? null, cash_session_id: (p.method === 'CASH' || p.method === 'CARD' || p.method === 'PIX' || p.method === 'TRANSFER') ? cashSessionId : null }))
+    let insertedPays: Array<{ id: string; method: 'CASH'|'CARD'|'PIX'|'TRANSFER'; amount: number }> = []
+    if (paysPayload.length) {
+      const { data: paysData, error: payErr } = await supabase.from('direct_sale_payments').insert(paysPayload).select('id, method, amount')
+      if (payErr) throw payErr
+      insertedPays = (paysData ?? []) as any
+    }
+    // 5) gerar movimentos de caixa (somente métodos não-Fiado)
+    if (cashSessionId && insertedPays.length) {
+      for (const p of insertedPays) {
+        if ((p as any).method !== 'FIADO') {
+          const { error: movErr } = await supabase.from('cash_movements').insert({
+            company_id: cid,
+            cash_session_id: cashSessionId,
+            type: 'DEPOSIT',
+            amount: Number(p.amount),
+            reference_type: 'PAYMENT',
+            reference_id: p.id,
+            method: (p as any).method,
+            notes: 'Venda PDV',
+          })
+          if (movErr) throw movErr
+        }
+      }
+    }
+
+    // 6) criar recebível quando houver pagamento FIADO (sem vencimento)
+    const fiadoTotal = input.payments.filter((p) => (p as any).method === 'FIADO').reduce((acc, p) => acc + Number(p.amount || 0), 0)
+    if (fiadoTotal > 0) {
+      const description = `Venda PDV`
+      // Prefer due_date null; if DB still has NOT NULL, fallback to a distant future date
+      const supportsNullDue = true // set by migration 0038; if not applied, server will error
+      const payload: any = {
+        customer_id: input.customer_id ?? null,
+        description,
+        issue_date: new Date().toISOString().slice(0,10),
+        due_date: supportsNullDue ? null : new Date(8640000000000000).toISOString().slice(0,10),
+        amount: fiadoTotal,
+        notes: 'Gerado automaticamente por venda PDV (fiado)',
+        reference_type: 'DIRECT_SALE',
+        reference_id: saleId,
+      }
+      await apiReceivables.create(payload)
+      // Futuro: atrelar recebível à venda por referência
+    }
+    return { id: saleId }
+  },
+  async updatePosSale(id: string, input: { customer_id?: string | null; items: Array<{ product_id: string; qty: number; unit_price: number }>; payments: Array<{ method: 'CASH'|'CARD'|'PIX'|'TRANSFER'; amount: number; notes?: string | null }>; notes?: string | null }) {
+    const cid = await getCompanyIdOrThrow()
+    // Load existing sale with items
+    const existing = await this.getPosSale(id)
+    if (!existing) throw new Error('Venda não encontrada')
+
+    const total = input.items.reduce((acc, it) => acc + Number(it.qty) * Number(it.unit_price), 0)
+
+    // Compute inventory delta per product
+    const sumBy = (arr: any[]) => {
+      const m = new Map<string, number>()
+      for (const it of arr) {
+        const pid = it.product_id as string
+        const qty = Number(it.qty)
+        m.set(pid, (m.get(pid) ?? 0) + qty)
+      }
+      return m
+    }
+    const oldMap = sumBy(existing.items ?? [])
+    const newMap = sumBy(input.items)
+    const allPids = new Set<string>([...Array.from(oldMap.keys()), ...Array.from(newMap.keys())])
+
+    // 1) Update order header
+    const { error: updErr } = await supabase
+      .from('direct_sale_orders')
+      .update({ customer_id: input.customer_id ?? null, total, notes: input.notes ?? null })
+      .eq('id', id)
+    if (updErr) throw updErr
+
+    // 2) Replace items
+    const { error: delItemsErr } = await supabase.from('direct_sale_items').delete().eq('sale_id', id)
+    if (delItemsErr) throw delItemsErr
+    const itemsPayload = input.items.map(it => ({ sale_id: id, product_id: it.product_id, qty: Number(it.qty), unit_price: Number(it.unit_price), total: Number(it.qty) * Number(it.unit_price) }))
+    if (itemsPayload.length) {
+      const { error: insItemsErr } = await supabase.from('direct_sale_items').insert(itemsPayload)
+      if (insItemsErr) throw insItemsErr
+    }
+
+    // 3) Adjust inventory based on delta (OUT for increase, IN for decrease)
+    for (const pid of allPids) {
+      const before = oldMap.get(pid) ?? 0
+      const after = newMap.get(pid) ?? 0
+      const delta = after - before
+      if (delta === 0) continue
+      if (delta > 0) {
+        const { error: invErr } = await supabase.from('inventory_movements').insert({ company_id: cid, product_id: pid, type: 'OUT', qty: delta, reason: 'Ajuste venda PDV', reference_id: id, reference_type: 'DIRECT_SALE' })
+        if (invErr) throw invErr
+      } else {
+        const { error: invErr } = await supabase.from('inventory_movements').insert({ company_id: cid, product_id: pid, type: 'IN', qty: Math.abs(delta), reason: 'Ajuste venda PDV', reference_id: id, reference_type: 'DIRECT_SALE' })
+        if (invErr) throw invErr
+      }
+    }
+
+  // 4) Replace payments and reconcile cash movements / receivables
+    // 4a) Remove cash movements linked to existing payments
+    const { data: oldPays, error: listOldPaysErr } = await supabase.from('direct_sale_payments').select('id').eq('sale_id', id)
+    if (listOldPaysErr) throw listOldPaysErr
+    const oldPayIds = (oldPays ?? []).map((r: any) => r.id)
+    if (oldPayIds.length) {
+      const { error: delMovErr } = await supabase
+        .from('cash_movements')
+        .delete()
+        .eq('reference_type', 'PAYMENT')
+        .in('reference_id', oldPayIds)
+      if (delMovErr) throw delMovErr
+    }
+    // 4b) Delete existing payments
+    const { error: delPaysErr } = await supabase.from('direct_sale_payments').delete().eq('sale_id', id)
+    if (delPaysErr) throw delPaysErr
+    // 4c) Insert new payments
+    // Try to attach to current open cash session
+    let cashSessionId: string | null = null
+    try { const s = await apiCash.getOpenSession(); cashSessionId = (s as any)?.id ?? null } catch { cashSessionId = null }
+    const paysPayload = input.payments.map(p => ({ sale_id: id, method: p.method as any, amount: Number(p.amount), notes: p.notes ?? null, cash_session_id: (p.method === 'CASH' || p.method === 'CARD' || p.method === 'PIX' || p.method === 'TRANSFER') ? cashSessionId : null }))
+    let newPays: Array<{ id: string; method: 'CASH'|'CARD'|'PIX'|'TRANSFER'; amount: number }> = []
+    if (paysPayload.length) {
+      const { data: paysData, error: insPaysErr } = await supabase.from('direct_sale_payments').insert(paysPayload).select('id, method, amount')
+      if (insPaysErr) throw insPaysErr
+      newPays = (paysData ?? []) as any
+    }
+    // 4d) Create new cash movements referencing those payments if session exists (skip FIADO)
+    if (cashSessionId && newPays.length) {
+      for (const p of newPays) {
+        if ((p as any).method !== 'FIADO') {
+          const { error: movErr } = await supabase.from('cash_movements').insert({
+            company_id: cid,
+            cash_session_id: cashSessionId,
+            type: 'DEPOSIT',
+            amount: Number(p.amount),
+            reference_type: 'PAYMENT',
+            reference_id: p.id,
+            method: (p as any).method,
+            notes: 'Venda PDV (edição)',
+          })
+          if (movErr) throw movErr
+        }
+      }
+    }
+
+    // 4e) Manage receivables for FIADO on edit: create with no due date
+    const fiadoTotal = input.payments.filter((p) => (p as any).method === 'FIADO').reduce((acc, p) => acc + Number(p.amount || 0), 0)
+    if (fiadoTotal > 0) {
+      const description = `Venda PDV`
+      const supportsNullDue2 = true
+      const payload2: any = {
+        customer_id: input.customer_id ?? null,
+        description,
+        issue_date: new Date().toISOString().slice(0,10),
+        due_date: supportsNullDue2 ? null : new Date(8640000000000000).toISOString().slice(0,10),
+        amount: fiadoTotal,
+        notes: 'Gerado automaticamente por edição da venda PDV (fiado)',
+        reference_type: 'DIRECT_SALE',
+        reference_id: id,
+      }
+      await apiReceivables.create(payload2)
+    }
+
+    return { id }
+  },
+  async listPosSales(params: { page: number; pageSize: number; sortBy?: string; sortDir?: 'asc' | 'desc' }) {
+    const { page, pageSize, sortBy = 'occurred_at', sortDir = 'desc' } = params
+    const from = page * pageSize
+    const to = from + pageSize - 1
+    const { data, error, count } = await supabase
+  .from('direct_sale_orders')
+  .select('*, customer:customer_id(id,full_name,phone), seller:seller_id(id,full_name,phone), payments:direct_sale_payments(method,amount)')
+      .order(sortBy, { ascending: sortDir === 'asc' })
+      .range(from, to)
+    if (error) throw error
+    return { data: data ?? [], count: count ?? 0 }
+  },
+  async getPosSale(id: string) {
+    // Fetch sale with customer, items (with product details), and payments
+    const { data, error } = await supabase
+      .from('direct_sale_orders')
+      .select(`
+        id, company_id, customer_id, total, occurred_at, notes,
+        customer:customer_id(id, full_name, phone),
+        seller:seller_id(id, full_name, phone),
+        items:direct_sale_items(*, product:product_id(id, sku, name, unit_price)),
+        payments:direct_sale_payments(id, method, amount, cash_session_id, notes)
+      `)
+      .eq('id', id)
+      .single()
+    if (error) throw error
+    return data as any
+  },
+  async removePosSale(id: string) {
+    // First, delete any cash movements linked to this sale's payments, then restore inventory, remove receivables (FIADO), and finally delete the sale
+    const { data: pays, error: paysErr } = await supabase
+      .from('direct_sale_payments')
+      .select('id')
+      .eq('sale_id', id)
+    if (paysErr) throw paysErr
+    const payIds = (pays ?? []).map((r: any) => r.id)
+    if (payIds.length) {
+      const { error: delMovErr } = await supabase
+        .from('cash_movements')
+        .delete()
+        .eq('reference_type', 'PAYMENT')
+        .in('reference_id', payIds)
+      if (delMovErr) throw delMovErr
+    }
+
+    // Restore inventory: add IN movements for each item of the sale
+    const cid = await getCompanyIdOrThrow()
+    const { data: items, error: itemsErr } = await supabase
+      .from('direct_sale_items')
+      .select('product_id, qty')
+      .eq('sale_id', id)
+    if (itemsErr) throw itemsErr
+    for (const it of (items ?? [])) {
+      const qty = Number((it as any).qty || 0)
+      if (qty > 0) {
+        const { error: invErr } = await supabase.from('inventory_movements').insert({ company_id: cid, product_id: (it as any).product_id, type: 'IN', qty, reason: 'Estorno venda PDV', reference_id: id, reference_type: 'DIRECT_SALE' })
+        if (invErr) throw invErr
+      }
+    }
+
+    // Remove receivables linked to this sale (FIADO)
+    const { error: delRecErr } = await supabase
+      .from('receivables')
+      .delete()
+      .eq('reference_type', 'DIRECT_SALE')
+      .eq('reference_id', id)
+    if (delRecErr) throw delRecErr
+
+    const { error } = await supabase.from('direct_sale_orders').delete().eq('id', id)
+    if (error) throw error
+    return true
   },
   async listDirectSales(params: { page: number; pageSize: number; query?: string; sortBy?: string; sortDir?: 'asc' | 'desc' }) {
     const { page, pageSize, sortBy = 'occurred_at', sortDir = 'desc' } = params
@@ -1750,5 +2244,19 @@ export const apiReminders = {
       const remaining = Math.max(0, Number(r.amount || 0) - Number(r.paid_total || 0))
       return { id: r.id as string, supplier_name: r.supplier?.name ?? '-', due_date: r.due_date as string, days_left, remaining, description: r.description as string }
     })
+  },
+}
+
+// MARKETING
+export const apiMarketing = {
+  async createLead(email: string, meta?: Record<string, any>) {
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('E-mail inválido')
+    const { data, error } = await supabase
+      .from('leads')
+      .insert({ email: email.trim().toLowerCase(), meta: meta ?? null })
+      .select('*')
+      .single()
+    if (error) throw error
+    return data
   },
 }

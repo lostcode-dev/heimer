@@ -33,3 +33,17 @@ export function maskTimeHHmm(input: string): string {
   if (digits.length <= 2) return digits
   return `${digits.slice(0, 2)}:${digits.slice(2)}`
 }
+
+export function formatDateTimeBR(value: string | number | Date | null | undefined): string {
+  if (!value) return '-'
+  const d = value instanceof Date ? value : new Date(value)
+  if (isNaN(d.getTime())) return '-'
+  return d.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
+}
+
+export function formatDateBR(value: string | number | Date | null | undefined): string {
+  if (!value) return '-'
+  const d = value instanceof Date ? value : new Date(value)
+  if (isNaN(d.getTime())) return '-'
+  return d.toLocaleDateString('pt-BR')
+}

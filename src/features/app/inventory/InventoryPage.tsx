@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { CustomTable } from '@/components/custom/Table/CustomTable'
+import { Link } from 'react-router-dom'
 import type { IColumns, IPagination } from '@/types'
 import { apiInventory, apiProducts } from '@/lib/api'
 import { InventoryForm } from './InventoryForm'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Download, Upload, FileSpreadsheet } from 'lucide-react'
+import { Download, Upload, FileSpreadsheet, ShoppingCart, Wrench } from 'lucide-react'
 import ImportInventoryModal, { type ImportedRow } from './ImportInventoryModal'
 import { supabase } from '@/lib/supabaseClient'
 import InventoryStockPage from './InventoryStockPage'
@@ -21,6 +22,8 @@ export type InventoryRow = {
   qty: number
   reason?: string | null
   occurred_at: string
+  reference_id?: string | null
+  reference_type?: 'SERVICE_ORDER' | 'MANUAL' | 'DIRECT_SALE' | null
 }
 
 export default function InventoryPage() {
@@ -34,6 +37,8 @@ export default function InventoryPage() {
   const [openForm, setOpenForm] = useState(false)
   const [editing, setEditing] = useState<InventoryRow | null>(null)
   const [editKey, setEditKey] = useState(0)
+  // Cache for OS ticket numbers to avoid per-row fetch
+  const [orderTickets, setOrderTickets] = useState<Record<string, string>>({})
 
   async function fetchData() {
     setLoading(true)
@@ -53,6 +58,34 @@ export default function InventoryPage() {
   }
 
   useEffect(() => { fetchData() }, [pagination.currentPage, pagination.itemsPerPage, pagination.search, pagination.sortField, pagination.sortOrder])
+
+  // Prefetch ticket numbers for SERVICE_ORDER references visible in the current page
+  useEffect(() => {
+    (async () => {
+      try {
+        const ids = Array.from(
+          new Set(
+            (rows || [])
+              .filter((r) => r.reference_type === 'SERVICE_ORDER' && r.reference_id)
+              .map((r) => r.reference_id as string)
+          )
+        ).filter((id) => !!id && !orderTickets[id])
+        if (!ids.length) return
+        const { data, error } = await supabase
+          .from('service_orders')
+          .select('id, ticket_number')
+          .in('id', ids)
+        if (error) throw error
+        const next: Record<string, string> = { ...orderTickets }
+        for (const row of data ?? []) {
+          next[(row as any).id] = (row as any).ticket_number ?? ''
+        }
+        setOrderTickets(next)
+      } catch {
+        // silent
+      }
+    })()
+  }, [rows])
 
   const onRequest = (updated: IPagination) => setPagination(updated)
 
@@ -109,6 +142,31 @@ export default function InventoryPage() {
     } },
     { label: 'Quantidade', field: 'qty', sortable: true, format: (v) => String(v) },
     { label: 'Motivo', field: 'reason', sortable: true, format: (v) => v ?? '-' },
+    { label: 'Origem', field: 'reference_id', sortable: false, component: ({ row }) => {
+      if (!row.reference_id || !row.reference_type) return <span className="text-muted-foreground">-</span>
+      if (row.reference_type === 'SERVICE_ORDER') {
+        const ticket = orderTickets[row.reference_id] ?? 'OS'
+        return (
+          <Link to={`/app/orders/${row.reference_id}`} className="no-underline">
+            <Badge className="px-2 py-0.5 gap-1.5 bg-indigo-100 text-indigo-800 hover:bg-indigo-200">
+              <Wrench className="size-3.5" /> {ticket}
+            </Badge>
+          </Link>
+        )
+      }
+      if (row.reference_type === 'DIRECT_SALE') {
+        const clean = String(row.reference_id).replace(/-/g, '')
+        const last5 = clean.slice(-5).toUpperCase()
+        return (
+          <Link to={`/app/sales/${row.reference_id}`} className="no-underline">
+            <Badge className="px-2 py-0.5 gap-1.5 bg-amber-100 text-amber-800 hover:bg-amber-200">
+              <ShoppingCart className="size-3.5" /> {last5}
+            </Badge>
+          </Link>
+        )
+      }
+      return <span className="text-muted-foreground">-</span>
+    } },
     { label: 'Data', field: 'occurred_at', sortable: true, format: (v) => new Date(v).toLocaleString('pt-BR') },
   ]
 
